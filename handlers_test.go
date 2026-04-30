@@ -658,20 +658,35 @@ func TestHandleAddToSprint(t *testing.T) {
 
 func TestHandleAssignIssue(t *testing.T) {
 	tests := map[string]struct {
+		err        error
 		params     map[string]any
 		stdout     string
+		stderr     string
 		wantInText string
+		wantErr    bool
 	}{
 		"assign to user": {
 			params:     map[string]any{"key": "TEST-1", "assignee": "alice@example.com"},
 			stdout:     "✓ Issue assigned",
 			wantInText: "Issue assigned",
 		},
+		"unassign": {
+			params:     map[string]any{"key": "TEST-1", "assignee": "none"},
+			stdout:     "✓ Issue unassigned",
+			wantInText: "Issue unassigned",
+		},
+		"assign fails": {
+			params:     map[string]any{"key": "TEST-1", "assignee": "nobody@example.com"},
+			stderr:     "user not found",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to assign",
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			jiraRunner = fakeRunner(tc.stdout, "", nil)
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
 			t.Cleanup(func() { jiraRunner = defaultRunJira })
 
 			result, err := handleAssignIssue(context.Background(), makeCallToolRequest(t, tc.params))
@@ -679,6 +694,9 @@ func TestHandleAssignIssue(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
 			if !strings.Contains(text, tc.wantInText) {
 				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
 			}
@@ -733,6 +751,27 @@ func TestHandleLinkIssues(t *testing.T) {
 	text := resultText(t, result)
 	if !strings.Contains(text, "Issues linked") {
 		t.Errorf("unexpected result: %s", text)
+	}
+}
+
+func TestHandleLinkIssuesError(t *testing.T) {
+	jiraRunner = fakeRunner("", "link type not found", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleLinkIssues(context.Background(), makeCallToolRequest(t, map[string]any{
+		"inward":  "TEST-1",
+		"outward": "TEST-2",
+		"type":    "InvalidType",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "Failed to link") {
+		t.Errorf("unexpected error: %s", text)
 	}
 }
 
