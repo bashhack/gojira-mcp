@@ -265,6 +265,53 @@ func handleAddComment(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
 }
 
+// handleAssignIssue assigns a Jira issue to a user, or unassigns it.
+func handleAssignIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	assignee := req.GetString("assignee", "")
+
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+	if assignee == "" {
+		return mcp.NewToolResultError("assignee is required"), nil
+	}
+
+	args := []string{"issue", "assign", key, assignee}
+	if assignee == "none" {
+		args = []string{"issue", "assign", key, "x"}
+	}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to assign %s: %s\n%s", key, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleLinkIssues creates a link between two Jira issues.
+func handleLinkIssues(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	inward := req.GetString("inward", "")
+	outward := req.GetString("outward", "")
+	linkType := req.GetString("type", "")
+
+	if inward == "" {
+		return mcp.NewToolResultError("inward is required"), nil
+	}
+	if outward == "" {
+		return mcp.NewToolResultError("outward is required"), nil
+	}
+	if linkType == "" {
+		return mcp.NewToolResultError("type is required"), nil
+	}
+
+	out, errOut, err := jiraRunner(ctx, "issue", "link", inward, outward, linkType)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to link %s to %s: %s\n%s", inward, outward, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
 // handleAddToSprint adds a Jira issue to the specified sprint.
 // Pass "active" as the sprint value to auto-detect the active sprint.
 func handleAddToSprint(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
