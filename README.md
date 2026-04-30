@@ -58,6 +58,36 @@ Verify it's connected:
 
 The `jira` server should show as healthy with 7 tools.
 
+## Usage
+
+Once registered, you don't call the tools directly — Claude Code calls them for you. Just ask for what you need in plain language:
+
+```
+> Create a bug ticket "Login redirect broken on Safari", high priority, assign to alice@example.com
+
+Created PROJ-456: "Login redirect broken on Safari"
+  Status: To Do -- OK
+  Sprint: 42 (active) -- OK
+https://example.atlassian.net/browse/PROJ-456
+```
+
+```
+> What tickets are in progress for the PROJ project?
+
+TYPE   KEY        SUMMARY                        STATUS        ASSIGNEE
+Bug    PROJ-456   Login redirect broken on Safari In Progress   alice@example.com
+Story  PROJ-411   Add dark mode support          In Progress   bob@example.com
+```
+
+```
+> Move PROJ-456 to Done and add a comment saying the fix shipped in v2.3.1
+
+✓ Issue transitioned to state "Done"
+✓ Comment added to issue "PROJ-456"
+```
+
+The tools work across any Jira project — whatever `jira-cli` is configured to access, gojira-mcp can reach.
+
 ## Tools
 
 ### `create_issue`
