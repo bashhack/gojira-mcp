@@ -38,8 +38,16 @@ go build -o gojira-mcp .
 
 ## Register with Claude Code
 
+If you installed with `go install`:
+
 ```bash
-claude mcp add --scope user jira -- /path/to/gojira-mcp
+claude mcp add --scope user jira -- "$(go env GOPATH)/bin/gojira-mcp"
+```
+
+If you built from source:
+
+```bash
+claude mcp add --scope user jira -- ./gojira-mcp
 ```
 
 Verify it's connected:
