@@ -55,9 +55,9 @@ linters:
         text: "QF1008:"
 
     paths:
-      - vendor
-      - bin
-      - docs
+      - "^vendor/"
+      - "^bin/"
+      - "^docs/"
       - ".*\\.pb\\.go$"
       - ".*_generated\\.go$"
 

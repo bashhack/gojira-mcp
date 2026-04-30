@@ -51,7 +51,7 @@ echo "$STAGED_PACKAGES" | sed 's/^/  - /'
 # Check formatting
 echo ""
 echo "🎨 Checking code formatting..."
-UNFORMATTED=$(goimports -l -local gojira-mcp $STAGED_GO_FILES)
+UNFORMATTED=$(goimports -l -local github.com/bashhack/gojira-mcp $STAGED_GO_FILES)
 if [ -n "$UNFORMATTED" ]; then
     echo "❌ The following files need formatting:"
     echo "$UNFORMATTED" | sed 's/^/  - /'

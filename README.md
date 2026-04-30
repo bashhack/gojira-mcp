@@ -4,6 +4,15 @@
 
 <h1 align="center">gojira-mcp</h1>
 
+<div align="center">
+
+[![Tests](https://github.com/bashhack/gojira-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/bashhack/gojira-mcp/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/bashhack/gojira-mcp/graph/badge.svg)](https://codecov.io/gh/bashhack/gojira-mcp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/bashhack/gojira-mcp)](https://pkg.go.dev/github.com/bashhack/gojira-mcp)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bashhack/gojira-mcp)](https://goreportcard.com/report/github.com/bashhack/gojira-mcp)
+
+</div>
+
 An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants structured access to Jira via [jira-cli](https://github.com/ankitpokhrel/jira-cli).
 
 The headline feature is `create_issue` — a single tool call that creates an issue **and** assigns it, links it to an epic, transitions its status, and adds it to a sprint. No more chaining five shell commands with fragile escaping.

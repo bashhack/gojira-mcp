@@ -26,7 +26,13 @@ jobs:
         run: go mod verify
 
       - name: Test
-        run: go test -v -race -count=1 ./...
+        run: go test -v -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: bashhack/gojira-mcp
 
   build:
     runs-on: ubuntu-latest
