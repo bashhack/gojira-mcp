@@ -25,17 +25,19 @@ The headline feature is `create_issue` — a single tool call that creates an is
 
 Download a prebuilt binary from [Releases](https://github.com/bashhack/gojira-mcp/releases):
 
+Download the tarball and `checksums.txt` for your platform, then:
+
 ```bash
-# Verify checksum
+# Verify checksum (recommended)
 shasum -a 256 -c checksums.txt
 
 # macOS (Apple Silicon)
 tar xzf gojira-mcp_darwin_arm64.tar.gz
-mv gojira-mcp /usr/local/bin/
+sudo mv gojira-mcp /usr/local/bin/
 
 # macOS (Intel)
 tar xzf gojira-mcp_darwin_amd64.tar.gz
-mv gojira-mcp /usr/local/bin/
+sudo mv gojira-mcp /usr/local/bin/
 
 # Linux (x86_64)
 tar xzf gojira-mcp_linux_amd64.tar.gz
