@@ -4,82 +4,63 @@
 version: "2"
 
 run:
-  # Timeout for analysis
   timeout: 5m
 
-  # Directories to skip
-  skip-dirs:
-    - vendor
-    - bin
-    - docs
-
-  # Which files to skip
-  skip-files:
-    - ".*\\.pb\\.go$"
-    - ".*_generated\\.go$"
-
 linters:
-  # Default linters (errcheck, govet, ineffassign, staticcheck, unused) are enabled automatically
-  # Only add additional linters here
   enable:
-    - gocritic       # Diagnostics for bugs, performance and style issues
-    - gosec          # Security problems
-    - misspell       # Commonly misspelled English words
-    - modernize      # Detects use of legacy code and suggests modern alternatives
-    - unconvert      # Unnecessary type conversions
-    - unparam        # Unused function parameters
+    - gocritic
+    - gosec
+    - misspell
+    - modernize
+    - unconvert
+    - unparam
 
   settings:
     staticcheck:
-      # Disable QF1008 check - explicit embedded field names preferred for clarity
       checks: ["all", "-QF1008"]
 
     govet:
-      # Enable all analyzers
       enable-all: true
 
     errcheck:
-      # Don't check for unchecked errors in type assertions
       check-type-assertions: false
-      # Check for blank assignments
       check-blank: true
 
     gosec:
-      # To specify a set of rules to explicitly exclude
       excludes:
-        - G101 # False positives on token purpose constants, SQL column names, error messages
-        - G104 # Audit errors not checked - we use errcheck for this
+        - G101
+        - G104
 
     gocritic:
-      # Enable multiple checks
       enabled-tags:
         - diagnostic
         - style
         - performance
       disabled-checks:
-        - unnamedResult # Allow unnamed results
+        - unnamedResult
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - gocritic
+
+      - text: "shadow: declaration of \"err\""
+        linters:
+          - govet
+
+      - linters:
+          - staticcheck
+        text: "QF1008:"
+
+    paths:
+      - "^vendor/"
+      - "^bin/"
+      - "^docs/"
+      - ".*\\.pb\\.go$"
+      - ".*_generated\\.go$"
 
 issues:
-  # Maximum issues count per one linter
   max-issues-per-linter: 0
-
-  # Maximum count of issues with the same text
   max-same-issues: 0
-
-  # Exclude known linters from partially hard-vendored code
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gosec
-        - gocritic
-
-    # Exclude shadow checking on the variable named err
-    - text: "shadow: declaration of \"err\""
-      linters:
-        - govet
-
-    # Exclude QF1008 - explicit embedded field names preferred for clarity
-    - linters:
-        - staticcheck
-      text: "QF1008:"
