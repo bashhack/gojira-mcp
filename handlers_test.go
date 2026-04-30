@@ -314,6 +314,38 @@ func TestHandleEditIssueMissingKey(t *testing.T) {
 	}
 }
 
+func TestHandleMoveIssueMissingParams(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		wantInText string
+	}{
+		"missing key": {
+			params:     map[string]any{"status": "Done"},
+			wantInText: "key is required",
+		},
+		"missing status": {
+			params:     map[string]any{"key": "TEST-1"},
+			wantInText: "status is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := handleMoveIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error result")
+			}
+			text := resultText(t, result)
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
 func TestHandleMoveIssue(t *testing.T) {
 	tests := map[string]struct {
 		err        error
@@ -354,6 +386,37 @@ func TestHandleMoveIssue(t *testing.T) {
 				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
 			}
 		})
+	}
+}
+
+func TestHandleViewIssueMissingKey(t *testing.T) {
+	result, err := handleViewIssue(context.Background(), makeCallToolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "key is required") {
+		t.Errorf("unexpected error: %s", text)
+	}
+}
+
+func TestHandleViewIssueError(t *testing.T) {
+	jiraRunner = fakeRunner("", "not found", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleViewIssue(context.Background(), makeCallToolRequest(t, map[string]any{"key": "TEST-999"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "Failed to view") {
+		t.Errorf("unexpected error: %s", text)
 	}
 }
 
@@ -437,6 +500,55 @@ func TestHandleListIssuesInvalidParent(t *testing.T) {
 	}
 }
 
+func TestHandleAddCommentMissingParams(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		wantInText string
+	}{
+		"missing key": {
+			params:     map[string]any{"body": "hello"},
+			wantInText: "key is required",
+		},
+		"missing body": {
+			params:     map[string]any{"key": "TEST-1"},
+			wantInText: "body is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := handleAddComment(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error result")
+			}
+			text := resultText(t, result)
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleAddCommentError(t *testing.T) {
+	jiraRunner = fakeRunner("", "failed", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleAddComment(context.Background(), makeCallToolRequest(t, map[string]any{"key": "TEST-1", "body": "hi"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "Failed to add comment") {
+		t.Errorf("unexpected error: %s", text)
+	}
+}
+
 func TestHandleAddComment(t *testing.T) {
 	jiraRunner = fakeRunner("✓ Comment added", "", nil)
 	t.Cleanup(func() { jiraRunner = defaultRunJira })
@@ -451,6 +563,38 @@ func TestHandleAddComment(t *testing.T) {
 	text := resultText(t, result)
 	if !strings.Contains(text, "Comment added") {
 		t.Errorf("unexpected result: %s", text)
+	}
+}
+
+func TestHandleAddToSprintMissingParams(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		wantInText string
+	}{
+		"missing key": {
+			params:     map[string]any{"sprint": "42"},
+			wantInText: "key is required",
+		},
+		"missing sprint": {
+			params:     map[string]any{"key": "TEST-1"},
+			wantInText: "sprint is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := handleAddToSprint(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error result")
+			}
+			text := resultText(t, result)
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
 	}
 }
 
