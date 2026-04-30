@@ -19,10 +19,27 @@ The headline feature is `create_issue` — a single tool call that creates an is
 
 ## Prerequisites
 
-- [Go 1.25+](https://go.dev/dl/)
 - [jira-cli](https://github.com/ankitpokhrel/jira-cli) installed and configured (`jira init`)
 
 ## Install
+
+Download a prebuilt binary from [Releases](https://github.com/bashhack/gojira-mcp/releases):
+
+```bash
+# macOS (Apple Silicon)
+tar xzf gojira-mcp_darwin_arm64.tar.gz
+mv gojira-mcp /usr/local/bin/
+
+# macOS (Intel)
+tar xzf gojira-mcp_darwin_amd64.tar.gz
+mv gojira-mcp /usr/local/bin/
+
+# Linux
+tar xzf gojira-mcp_linux_amd64.tar.gz
+sudo mv gojira-mcp /usr/local/bin/
+```
+
+Or with Go 1.25+:
 
 ```bash
 go install github.com/bashhack/gojira-mcp@latest
@@ -38,6 +55,12 @@ go build -o gojira-mcp .
 
 ## Register with Claude Code
 
+If you downloaded a prebuilt binary:
+
+```bash
+claude mcp add --scope user jira -- /usr/local/bin/gojira-mcp
+```
+
 If you installed with `go install`:
 
 ```bash
@@ -49,6 +72,8 @@ If you built from source:
 ```bash
 claude mcp add --scope user jira -- ./gojira-mcp
 ```
+
+Restart your Claude Code session after registering.
 
 Verify it's connected:
 
