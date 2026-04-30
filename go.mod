@@ -1,4 +1,4 @@
-module gojira-mcp
+module github.com/bashhack/gojira-mcp
 
 go 1.25.5
 

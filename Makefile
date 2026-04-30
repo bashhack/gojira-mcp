@@ -54,7 +54,7 @@ format:
 		echo "Installing goimports..."; \
 		go install golang.org/x/tools/cmd/goimports@latest; \
 	fi
-	@goimports -w -local gojira-mcp $$(find . -name '*.go' -not -path "./vendor/*")
+	@goimports -w -local github.com/bashhack/gojira-mcp $$(find . -name '*.go' -not -path "./vendor/*")
 	@echo '✅ Code formatted'
 
 ## format/check: Check if code is properly formatted (non-destructive)
@@ -65,9 +65,9 @@ format/check:
 		echo "Installing goimports..."; \
 		go install golang.org/x/tools/cmd/goimports@latest; \
 	fi
-	@if [ -n "$$(goimports -l -local gojira-mcp $$(find . -name '*.go' -not -path './vendor/*'))" ]; then \
+	@if [ -n "$$(goimports -l -local github.com/bashhack/gojira-mcp $$(find . -name '*.go' -not -path './vendor/*'))" ]; then \
 		echo "❌ The following files need formatting:"; \
-		goimports -l -local gojira-mcp $$(find . -name '*.go' -not -path './vendor/*'); \
+		goimports -l -local github.com/bashhack/gojira-mcp $$(find . -name '*.go' -not -path './vendor/*'); \
 		echo "Run 'make format' to fix"; \
 		exit 1; \
 	fi
@@ -81,7 +81,7 @@ lint:
 		echo "Installing goimports..."; \
 		go install golang.org/x/tools/cmd/goimports@latest; \
 	fi
-	@goimports -w -local gojira-mcp $$(find . -name '*.go' -not -path "./vendor/*")
+	@goimports -w -local github.com/bashhack/gojira-mcp $$(find . -name '*.go' -not -path "./vendor/*")
 	@echo 'Vetting code...'
 	go vet ./...
 	$(MAKE) check_staticcheck
@@ -132,7 +132,7 @@ audit:
 		echo "Installing goimports..."; \
 		go install golang.org/x/tools/cmd/goimports@latest; \
 	fi
-	@goimports -w -local gojira-mcp $$(find . -name '*.go' -not -path "./vendor/*")
+	@goimports -w -local github.com/bashhack/gojira-mcp $$(find . -name '*.go' -not -path "./vendor/*")
 	@echo 'Vetting code...'
 	go vet ./...
 	$(MAKE) check_staticcheck
