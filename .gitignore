@@ -1,0 +1,5 @@
+gojira-mcp
+bin/
+coverage.out
+dist/
+.env

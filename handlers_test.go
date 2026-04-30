@@ -1,0 +1,527 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/mark3labs/mcp-go/mcp"
+)
+
+var errFake = errors.New("fake error")
+
+func fakeRunner(stdout, stderr string, err error) func(context.Context, ...string) (string, string, error) {
+	return func(_ context.Context, _ ...string) (string, string, error) {
+		return stdout, stderr, err
+	}
+}
+
+type fakeResponse struct {
+	err    error
+	stdout string
+	stderr string
+}
+
+type callRecord struct {
+	args []string
+}
+
+type sequenceRunner struct {
+	calls     []callRecord
+	responses []fakeResponse
+}
+
+func (s *sequenceRunner) run(_ context.Context, args ...string) (string, string, error) {
+	s.calls = append(s.calls, callRecord{args: args})
+	idx := len(s.calls) - 1
+	if idx >= len(s.responses) {
+		idx = len(s.responses) - 1
+	}
+	r := s.responses[idx]
+	return r.stdout, r.stderr, r.err
+}
+
+func makeCallToolRequest(t *testing.T, params map[string]any) mcp.CallToolRequest {
+	t.Helper()
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("failed to marshal params: %v", err)
+	}
+	var req mcp.CallToolRequest
+	req.Params.Name = "test"
+	if err := json.Unmarshal(raw, &req.Params.Arguments); err != nil {
+		t.Fatalf("failed to unmarshal params: %v", err)
+	}
+	return req
+}
+
+func TestHandleCreateIssue(t *testing.T) {
+	tests := map[string]struct {
+		runner     *sequenceRunner
+		params     map[string]any
+		wantInText []string
+		wantErr    bool
+	}{
+		"basic create": {
+			params: map[string]any{
+				"summary": "Fix login bug",
+				"type":    "Bug",
+			},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "✓ Issue created\nhttps://example.atlassian.net/browse/TEST-100\n"},
+				},
+			},
+			wantInText: []string{"Created TEST-100", "Fix login bug"},
+		},
+		"create with all options": {
+			params: map[string]any{
+				"summary":  "Add caching",
+				"type":     "Story",
+				"priority": "High",
+				"assignee": "alice@example.com",
+				"epic":     "TEST-50",
+				"status":   "In Progress",
+				"sprint":   "42",
+				"labels":   []any{"backend", "perf"},
+			},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "https://example.atlassian.net/browse/TEST-200\n"},
+					{stdout: "moved"},
+					{stdout: "sprint ok"},
+				},
+			},
+			wantInText: []string{
+				"Created TEST-200",
+				"Status: In Progress -- OK",
+				"Sprint: 42 -- OK",
+			},
+		},
+		"create with active sprint": {
+			params: map[string]any{
+				"summary": "Sprint test",
+				"type":    "Task",
+				"sprint":  "active",
+			},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "https://example.atlassian.net/browse/TEST-300\n"},
+					{stdout: "3601\n"},
+					{stdout: "added"},
+				},
+			},
+			wantInText: []string{"Created TEST-300", "Sprint: 3601 (active) -- OK"},
+		},
+		"create fails": {
+			params: map[string]any{
+				"summary": "Fail",
+				"type":    "Task",
+			},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stderr: "auth error", err: errFake},
+				},
+			},
+			wantErr:    true,
+			wantInText: []string{"Failed to create issue"},
+		},
+		"create succeeds but status transition fails": {
+			params: map[string]any{
+				"summary": "Partial",
+				"type":    "Task",
+				"status":  "In Review",
+			},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "https://example.atlassian.net/browse/TEST-400\n"},
+					{stderr: "transition not available", err: errFake},
+				},
+			},
+			wantInText: []string{"Created TEST-400", "Status: In Review -- FAILED"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = tc.runner.run
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleCreateIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected tool error, got success")
+			}
+			if !tc.wantErr && result.IsError {
+				t.Fatalf("expected success, got tool error: %s", text)
+			}
+			for _, want := range tc.wantInText {
+				if !strings.Contains(text, want) {
+					t.Errorf("result missing %q\nfull text: %s", want, text)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleCreateIssueBuildArgs(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{
+			{stdout: "https://example.atlassian.net/browse/TEST-1\n"},
+		},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	req := makeCallToolRequest(t, map[string]any{
+		"summary":     "Test args",
+		"type":        "Story",
+		"description": "A long\nmultiline\ndescription",
+		"priority":    "High",
+		"assignee":    "bob@example.com",
+		"epic":        "TEST-1",
+		"project":     "TEST",
+		"labels":      []any{"sec", "api"},
+	})
+
+	if _, err := handleCreateIssue(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(runner.calls) == 0 {
+		t.Fatal("no calls recorded")
+	}
+	args := strings.Join(runner.calls[0].args, " ")
+
+	for _, want := range []string{"-t Story", "-s Test args", "-b A long\nmultiline\ndescription", "-y High", "-a bob@example.com", "-P TEST-1", "-p TEST", "-l sec", "-l api"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\nfull args: %s", want, args)
+		}
+	}
+}
+
+func TestHandleCreateIssueMissingRequired(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		wantInText string
+	}{
+		"missing summary": {
+			params:     map[string]any{"type": "Bug"},
+			wantInText: "summary is required",
+		},
+		"missing type": {
+			params:     map[string]any{"summary": "Fix it"},
+			wantInText: "type is required",
+		},
+		"both missing": {
+			params:     map[string]any{},
+			wantInText: "summary is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := handleCreateIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error result")
+			}
+			text := resultText(t, result)
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleEditIssue(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"edit succeeds": {
+			params:     map[string]any{"key": "TEST-1", "summary": "New title", "priority": "Low"},
+			stdout:     "✓ Issue updated\nhttps://example.atlassian.net/browse/TEST-1\n",
+			wantInText: "Issue updated",
+		},
+		"edit fails": {
+			params:     map[string]any{"key": "TEST-1", "summary": "x"},
+			stderr:     "not found",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to edit",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleEditIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleEditIssueNoFields(t *testing.T) {
+	result, err := handleEditIssue(context.Background(), makeCallToolRequest(t, map[string]any{"key": "TEST-1"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result for no fields")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "no fields to update") {
+		t.Errorf("unexpected error: %s", text)
+	}
+}
+
+func TestHandleEditIssueMissingKey(t *testing.T) {
+	result, err := handleEditIssue(context.Background(), makeCallToolRequest(t, map[string]any{"summary": "x"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "key is required") {
+		t.Errorf("unexpected error: %s", text)
+	}
+}
+
+func TestHandleMoveIssue(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"move succeeds": {
+			params:     map[string]any{"key": "TEST-1", "status": "Done"},
+			stdout:     "✓ Issue transitioned",
+			wantInText: "Issue transitioned",
+		},
+		"move fails": {
+			params:     map[string]any{"key": "TEST-1", "status": "Invalid"},
+			stderr:     "transition not found",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to move",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleMoveIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleViewIssue(t *testing.T) {
+	jiraRunner = fakeRunner("TYPE: Bug\nKEY: TEST-1\nSUMMARY: Fix it\n", "", nil)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleViewIssue(context.Background(), makeCallToolRequest(t, map[string]any{"key": "TEST-1"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "TEST-1") {
+		t.Errorf("expected TEST-1 in output, got: %s", text)
+	}
+}
+
+func TestHandleListIssues(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		wantInArgs []string
+	}{
+		"with jql": {
+			params:     map[string]any{"jql": "project = TEST ORDER BY created"},
+			wantInArgs: []string{"-q", "project = TEST ORDER BY created"},
+		},
+		"with filters": {
+			params:     map[string]any{"assignee": "alice", "type": "Bug", "priority": "High"},
+			wantInArgs: []string{"-a", "alice", "-t", "Bug", "-y", "High"},
+		},
+		"with parent": {
+			params:     map[string]any{"parent": "TEST-100"},
+			wantInArgs: []string{"-q", "parent = TEST-100"},
+		},
+		"custom limit": {
+			params:     map[string]any{"limit": float64(50)},
+			wantInArgs: []string{"--paginate=50"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			runner := &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "TYPE\tKEY\tSUMMARY\n"},
+				},
+			}
+			jiraRunner = runner.run
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			if _, err := handleListIssues(context.Background(), makeCallToolRequest(t, tc.params)); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(runner.calls) == 0 {
+				t.Fatal("no calls recorded")
+			}
+			args := strings.Join(runner.calls[0].args, " ")
+			for _, want := range tc.wantInArgs {
+				if !strings.Contains(args, want) {
+					t.Errorf("args missing %q\nfull args: %s", want, args)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleListIssuesInvalidParent(t *testing.T) {
+	result, err := handleListIssues(context.Background(), makeCallToolRequest(t, map[string]any{
+		"parent": "not-a-key",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for invalid parent key")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "invalid parent key") {
+		t.Errorf("unexpected error: %s", text)
+	}
+}
+
+func TestHandleAddComment(t *testing.T) {
+	jiraRunner = fakeRunner("✓ Comment added", "", nil)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleAddComment(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key":  "TEST-1",
+		"body": "Looks good!",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "Comment added") {
+		t.Errorf("unexpected result: %s", text)
+	}
+}
+
+func TestHandleAddToSprint(t *testing.T) {
+	tests := map[string]struct {
+		runner     *sequenceRunner
+		params     map[string]any
+		wantInText string
+		wantErr    bool
+	}{
+		"explicit sprint ID": {
+			params: map[string]any{"key": "TEST-1", "sprint": "42"},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "added"},
+				},
+			},
+			wantInText: "Added TEST-1 to sprint 42",
+		},
+		"active sprint": {
+			params: map[string]any{"key": "TEST-1", "sprint": "active"},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "3601\n"},
+					{stdout: "added"},
+				},
+			},
+			wantInText: "sprint 3601 (active)",
+		},
+		"no active sprint found": {
+			params: map[string]any{"key": "TEST-1", "sprint": "active"},
+			runner: &sequenceRunner{
+				responses: []fakeResponse{
+					{stdout: "\n"},
+				},
+			},
+			wantErr:    true,
+			wantInText: "Failed to find active sprint",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = tc.runner.run
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleAddToSprint(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func resultText(t *testing.T, result *mcp.CallToolResult) string {
+	t.Helper()
+	if result == nil {
+		t.Fatal("result is nil")
+	}
+	var parts []string
+	for _, c := range result.Content {
+		if tc, ok := c.(mcp.TextContent); ok {
+			parts = append(parts, tc.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
