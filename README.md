@@ -62,7 +62,7 @@ The `jira` server should show as healthy with 7 tools.
 
 Once registered, you don't call the tools directly — Claude Code calls them for you. Just ask for what you need in plain language:
 
-```
+```text
 > Create a bug ticket "Login redirect broken on Safari", high priority, assign to alice@example.com
 
 Created PROJ-456: "Login redirect broken on Safari"
@@ -71,7 +71,7 @@ Created PROJ-456: "Login redirect broken on Safari"
 https://example.atlassian.net/browse/PROJ-456
 ```
 
-```
+```text
 > What tickets are in progress for the PROJ project?
 
 TYPE   KEY        SUMMARY                        STATUS        ASSIGNEE
@@ -79,7 +79,7 @@ Bug    PROJ-456   Login redirect broken on Safari In Progress   alice@example.co
 Story  PROJ-411   Add dark mode support          In Progress   bob@example.com
 ```
 
-```
+```text
 > Move PROJ-456 to Done and add a comment saying the fix shipped in v2.3.1
 
 ✓ Issue transitioned to state "Done"
