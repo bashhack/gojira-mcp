@@ -73,3 +73,16 @@ var addToSprintTool = mcp.NewTool("add_to_sprint",
 	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
 	mcp.WithString("sprint", mcp.Required(), mcp.Description("Sprint ID, or 'active' to auto-detect")),
 )
+
+var assignIssueTool = mcp.NewTool("assign_issue",
+	mcp.WithDescription("Assign a Jira issue to a user, or unassign it."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithString("assignee", mcp.Required(), mcp.Description("Assignee email or username, or 'none' to unassign")),
+)
+
+var linkIssuesTool = mcp.NewTool("link_issues",
+	mcp.WithDescription("Create a link between two Jira issues."),
+	mcp.WithString("inward", mcp.Required(), mcp.Description("Issue key for the inward side, e.g. PROJ-123")),
+	mcp.WithString("outward", mcp.Required(), mcp.Description("Issue key for the outward side, e.g. PROJ-456")),
+	mcp.WithString("type", mcp.Required(), mcp.Description("Link type, e.g. 'Blocks', 'is blocked by', 'Duplicate', 'Relates'")),
+)

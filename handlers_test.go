@@ -656,6 +656,122 @@ func TestHandleAddToSprint(t *testing.T) {
 	}
 }
 
+func TestHandleAssignIssue(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		stdout     string
+		wantInText string
+	}{
+		"assign to user": {
+			params:     map[string]any{"key": "TEST-1", "assignee": "alice@example.com"},
+			stdout:     "✓ Issue assigned",
+			wantInText: "Issue assigned",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, "", nil)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleAssignIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			text := resultText(t, result)
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleAssignIssueMissingParams(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		wantInText string
+	}{
+		"missing key": {
+			params:     map[string]any{"assignee": "alice@example.com"},
+			wantInText: "key is required",
+		},
+		"missing assignee": {
+			params:     map[string]any{"key": "TEST-1"},
+			wantInText: "assignee is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := handleAssignIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error result")
+			}
+			text := resultText(t, result)
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleLinkIssues(t *testing.T) {
+	jiraRunner = fakeRunner("✓ Issues linked", "", nil)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleLinkIssues(context.Background(), makeCallToolRequest(t, map[string]any{
+		"inward":  "TEST-1",
+		"outward": "TEST-2",
+		"type":    "Blocks",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "Issues linked") {
+		t.Errorf("unexpected result: %s", text)
+	}
+}
+
+func TestHandleLinkIssuesMissingParams(t *testing.T) {
+	tests := map[string]struct {
+		params     map[string]any
+		wantInText string
+	}{
+		"missing inward": {
+			params:     map[string]any{"outward": "TEST-2", "type": "Blocks"},
+			wantInText: "inward is required",
+		},
+		"missing outward": {
+			params:     map[string]any{"inward": "TEST-1", "type": "Blocks"},
+			wantInText: "outward is required",
+		},
+		"missing type": {
+			params:     map[string]any{"inward": "TEST-1", "outward": "TEST-2"},
+			wantInText: "type is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := handleLinkIssues(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error result")
+			}
+			text := resultText(t, result)
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
 func resultText(t *testing.T, result *mcp.CallToolResult) string {
 	t.Helper()
 	if result == nil {
