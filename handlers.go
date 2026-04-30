@@ -279,7 +279,7 @@ func handleAssignIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 
 	args := []string{"issue", "assign", key, assignee}
 	if assignee == "none" {
-		args = []string{"issue", "assign", key, "x", "--no-input"}
+		args = []string{"issue", "assign", key, "x"}
 	}
 
 	out, errOut, err := jiraRunner(ctx, args...)
