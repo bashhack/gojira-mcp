@@ -21,6 +21,7 @@ var createIssueTool = mcp.NewTool("create_issue",
 	mcp.WithString("sprint", mcp.Description("Sprint ID, or 'active' to auto-detect the active sprint")),
 	mcp.WithString("project", mcp.Description("Project key override")),
 	mcp.WithArray("labels", mcp.Description("Labels to apply")),
+	mcp.WithObject("custom", mcp.Description("Custom fields as key-value pairs, e.g. {\"story-points\": \"5\"}"), mcp.AdditionalProperties(true)),
 )
 
 var editIssueTool = mcp.NewTool("edit_issue",
@@ -31,6 +32,7 @@ var editIssueTool = mcp.NewTool("edit_issue",
 	mcp.WithString("assignee", mcp.Description("New assignee")),
 	mcp.WithString("epic", mcp.Description("Parent epic key")),
 	mcp.WithArray("labels", mcp.Description("Labels to add")),
+	mcp.WithObject("custom", mcp.Description("Custom fields as key-value pairs, e.g. {\"story-points\": \"5\"}"), mcp.AdditionalProperties(true)),
 )
 
 var moveIssueTool = mcp.NewTool("move_issue",
@@ -86,4 +88,12 @@ var linkIssuesTool = mcp.NewTool("link_issues",
 	mcp.WithString("inward", mcp.Required(), mcp.Description("Issue key for the inward side, e.g. PROJ-123")),
 	mcp.WithString("outward", mcp.Required(), mcp.Description("Issue key for the outward side, e.g. PROJ-456")),
 	mcp.WithString("type", mcp.Required(), mcp.Description("Link type, e.g. 'Blocks', 'is blocked by', 'Duplicate', 'Relates'")),
+)
+
+var searchUsersTool = mcp.NewTool("search_users",
+	mcp.WithDescription("Search for Jira users by name, email, or username. Returns display names and emails for use in assignment."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("query", mcp.Required(), mcp.Description("Search string: partial name, email, or username")),
+	mcp.WithString("project", mcp.Description("Project key to scope results to assignable users")),
 )

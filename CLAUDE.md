@@ -9,6 +9,7 @@ An MCP server in Go that wraps jira-cli, giving AI assistants structured Jira to
 ```
 main.go          — entry point, server setup, tool registration
 jira.go          — jira-cli exec wrapper, output parsing
+api.go           — Jira REST API client, config/auth loading
 tools.go         — MCP tool definitions (schemas, descriptions, annotations)
 handlers.go      — tool handler functions
 ```

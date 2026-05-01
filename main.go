@@ -36,6 +36,7 @@ func main() {
 	s.AddTool(addToSprintTool, handleAddToSprint)
 	s.AddTool(assignIssueTool, handleAssignIssue)
 	s.AddTool(linkIssuesTool, handleLinkIssues)
+	s.AddTool(searchUsersTool, handleSearchUsers)
 
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("server error: %v", err)
