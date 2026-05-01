@@ -188,6 +188,7 @@ func TestHandleCreateIssueBuildArgs(t *testing.T) {
 		"epic":        "TEST-1",
 		"project":     "TEST",
 		"labels":      []any{"sec", "api"},
+		"custom":      map[string]any{"story-points": "5"},
 	})
 
 	if _, err := handleCreateIssue(context.Background(), req); err != nil {
@@ -199,7 +200,7 @@ func TestHandleCreateIssueBuildArgs(t *testing.T) {
 	}
 	args := strings.Join(runner.calls[0].args, " ")
 
-	for _, want := range []string{"-t Story", "-s Test args", "-b A long\nmultiline\ndescription", "-y High", "-a bob@example.com", "-P TEST-1", "-p TEST", "-l sec", "-l api"} {
+	for _, want := range []string{"-t Story", "-s Test args", "-b A long\nmultiline\ndescription", "-y High", "-a bob@example.com", "-P TEST-1", "-p TEST", "-l sec", "-l api", "--custom story-points=5"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q\nfull args: %s", want, args)
 		}
@@ -283,6 +284,37 @@ func TestHandleEditIssue(t *testing.T) {
 				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
 			}
 		})
+	}
+}
+
+func TestHandleEditIssueCustomFields(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{
+			{stdout: "✓ Issue updated\nhttps://example.atlassian.net/browse/TEST-1\n"},
+		},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	req := makeCallToolRequest(t, map[string]any{
+		"key":    "TEST-1",
+		"custom": map[string]any{"story-points": "3"},
+	})
+
+	result, err := handleEditIssue(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	if len(runner.calls) == 0 {
+		t.Fatal("no calls recorded")
+	}
+	args := strings.Join(runner.calls[0].args, " ")
+	if !strings.Contains(args, "--custom story-points=3") {
+		t.Errorf("args missing custom field\nfull args: %s", args)
 	}
 }
 
@@ -808,6 +840,106 @@ func TestHandleLinkIssuesMissingParams(t *testing.T) {
 				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
 			}
 		})
+	}
+}
+
+func fakeAPIFetcher(body []byte, err error) func(context.Context, string, string) ([]byte, error) {
+	return func(_ context.Context, _, _ string) ([]byte, error) {
+		return body, err
+	}
+}
+
+func TestHandleSearchUsers(t *testing.T) {
+	tests := map[string]struct {
+		fetcher    func(context.Context, string, string) ([]byte, error)
+		params     map[string]any
+		wantInText []string
+		wantErr    bool
+	}{
+		"basic search": {
+			params: map[string]any{"query": "alice"},
+			fetcher: fakeAPIFetcher([]byte(`[
+				{"accountId":"abc123","displayName":"Alice Smith","emailAddress":"alice@example.com"},
+				{"accountId":"def456","displayName":"Alice Jones","emailAddress":"alice.jones@example.com"}
+			]`), nil),
+			wantInText: []string{"Alice Smith", "alice@example.com", "Alice Jones"},
+		},
+		"no results": {
+			params:     map[string]any{"query": "zzzzzzz"},
+			fetcher:    fakeAPIFetcher([]byte(`[]`), nil),
+			wantInText: []string{"No users found"},
+		},
+		"missing query": {
+			params:     map[string]any{},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"query is required"},
+		},
+		"api error": {
+			params:     map[string]any{"query": "alice"},
+			fetcher:    fakeAPIFetcher(nil, errFake),
+			wantErr:    true,
+			wantInText: []string{"Failed to search users"},
+		},
+		"user without email": {
+			params: map[string]any{"query": "bot"},
+			fetcher: fakeAPIFetcher([]byte(`[
+				{"accountId":"bot1","displayName":"Build Bot","emailAddress":""}
+			]`), nil),
+			wantInText: []string{"Build Bot", "accountId: bot1"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraAPIFetcher = tc.fetcher
+			t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+			result, err := handleSearchUsers(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !tc.wantErr && result.IsError {
+				t.Fatalf("expected success, got error: %s", text)
+			}
+			for _, want := range tc.wantInText {
+				if !strings.Contains(text, want) {
+					t.Errorf("result missing %q\nfull: %s", want, text)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleSearchUsersAPIPath(t *testing.T) {
+	var capturedPath string
+	jiraAPIFetcher = func(_ context.Context, _ string, path string) ([]byte, error) {
+		capturedPath = path
+		return []byte(`[]`), nil
+	}
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleSearchUsers(context.Background(), makeCallToolRequest(t, map[string]any{
+		"query":   "alice",
+		"project": "PRO",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+
+	if !strings.Contains(capturedPath, "project=PRO") {
+		t.Errorf("path missing project param: %s", capturedPath)
+	}
+	if !strings.Contains(capturedPath, "query=alice") {
+		t.Errorf("path missing query param: %s", capturedPath)
 	}
 }
 

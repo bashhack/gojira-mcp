@@ -140,8 +140,17 @@ Create a Jira issue with optional assignment, epic linkage, status transition, a
 | `sprint`      | string   | no       | Sprint ID, or `active` to auto-detect           |
 | `project`     | string   | no       | Project key override                            |
 | `labels`      | string[] | no       | Labels to apply                                 |
+| `custom`      | object   | no       | Custom fields as key-value pairs (see below)    |
 
 Post-creation steps (status, sprint) are best-effort — failures are reported but don't prevent the issue from being created.
+
+The `custom` parameter passes arbitrary fields to jira-cli's `--custom` flag. Field names must match your jira-cli configuration (see `jira init`). Common example — setting story points:
+
+```text
+> Create a story "Add caching layer" with 5 story points, assign to alice@example.com
+
+# The tool receives: {"custom": {"story_points": "5"}}
+```
 
 Example output:
 
@@ -164,6 +173,7 @@ Update fields on an existing issue.
 | `assignee` | string   | no       | New assignee      |
 | `epic`     | string   | no       | Parent epic key   |
 | `labels`   | string[] | no       | Labels to add     |
+| `custom`   | object   | no       | Custom fields as key-value pairs |
 
 ### `move_issue`
 
@@ -216,6 +226,25 @@ Add an issue to a sprint.
 |-----------|--------|----------|-------------------------------------|
 | `key`     | string | yes      | e.g. `PROJ-123`                     |
 | `sprint`  | string | yes      | Sprint ID, or `active` to auto-detect |
+
+### `search_users`
+
+Search for Jira users by name, email, or username. Useful for finding the right assignee without knowing their exact display name or email.
+
+| Parameter | Type   | Required | Description                                        |
+|-----------|--------|----------|----------------------------------------------------|
+| `query`   | string | yes      | Partial name, email, or username                   |
+| `project` | string | no       | Project key to scope to assignable users           |
+
+This tool calls the Jira REST API directly (not jira-cli) and requires the `JIRA_API_TOKEN` environment variable to be set.
+
+Example:
+
+```text
+> Search for users named "aaron" who can be assigned to PRO tickets
+
+Aaron Maturen <aaron@example.com> (accountId: 5f3c...)
+```
 
 ## How it works
 
