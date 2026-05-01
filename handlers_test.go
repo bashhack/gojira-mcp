@@ -924,10 +924,16 @@ func TestHandleSearchUsersAPIPath(t *testing.T) {
 	}
 	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
 
-	_, _ = handleSearchUsers(context.Background(), makeCallToolRequest(t, map[string]any{
+	result, err := handleSearchUsers(context.Background(), makeCallToolRequest(t, map[string]any{
 		"query":   "alice",
 		"project": "PRO",
 	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
 
 	if !strings.Contains(capturedPath, "project=PRO") {
 		t.Errorf("path missing project param: %s", capturedPath)

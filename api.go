@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,7 +30,7 @@ var apiHTTPClient = &http.Client{Timeout: 15 * time.Second}
 // loadJiraConfig reads the jira-cli config file and extracts the
 // server URL and login email. It checks JIRA_CONFIG_FILE first,
 // then falls back to ~/.config/.jira/.config.yml.
-func loadJiraConfig() (jiraConfig, error) {
+func loadJiraConfig() (cfg jiraConfig, retErr error) {
 	path := os.Getenv("JIRA_CONFIG_FILE")
 	if path == "" {
 		home, err := os.UserHomeDir()
@@ -43,9 +44,11 @@ func loadJiraConfig() (jiraConfig, error) {
 	if err != nil {
 		return jiraConfig{}, fmt.Errorf("cannot open jira config %s: %w", path, err)
 	}
-	defer f.Close()
-
-	var cfg jiraConfig
+	defer func() {
+		if cErr := f.Close(); cErr != nil {
+			retErr = errors.Join(retErr, cErr)
+		}
+	}()
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -74,7 +77,7 @@ func loadJiraConfig() (jiraConfig, error) {
 // defaultJiraAPIFetch makes an authenticated HTTP request to the Jira
 // REST API. It reads credentials from the jira-cli config and
 // JIRA_API_TOKEN environment variable.
-func defaultJiraAPIFetch(ctx context.Context, method, path string) ([]byte, error) {
+func defaultJiraAPIFetch(ctx context.Context, method, path string) (_ []byte, retErr error) {
 	cfg, err := loadJiraConfig()
 	if err != nil {
 		return nil, err
@@ -98,7 +101,11 @@ func defaultJiraAPIFetch(ctx context.Context, method, path string) ([]byte, erro
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cErr := resp.Body.Close(); cErr != nil {
+			retErr = errors.Join(retErr, cErr)
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
