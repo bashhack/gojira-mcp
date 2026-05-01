@@ -53,6 +53,18 @@ func handleCreateIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	for _, l := range labels {
 		args = append(args, "-l", l)
 	}
+	for _, c := range req.GetStringSlice("components", nil) {
+		args = append(args, "-C", c)
+	}
+	for _, v := range req.GetStringSlice("fix_version", nil) {
+		args = append(args, "--fix-version", v)
+	}
+	for _, v := range req.GetStringSlice("affects_version", nil) {
+		args = append(args, "--affects-version", v)
+	}
+	if est := req.GetString("original_estimate", ""); est != "" {
+		args = append(args, "-e", est)
+	}
 	if reqArgs := req.GetArguments(); reqArgs != nil {
 		if customRaw, ok := reqArgs["custom"]; ok {
 			if customMap, ok := customRaw.(map[string]any); ok {
@@ -124,10 +136,14 @@ func handleCreateIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 func handleEditIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
 	key := req.GetString("key", "")
 	summary := req.GetString("summary", "")
+	body := req.GetString("body", "")
 	priority := req.GetString("priority", "")
 	assignee := req.GetString("assignee", "")
 	epic := req.GetString("epic", "")
 	labels := req.GetStringSlice("labels", nil)
+	components := req.GetStringSlice("components", nil)
+	fixVersions := req.GetStringSlice("fix_version", nil)
+	affectsVersions := req.GetStringSlice("affects_version", nil)
 
 	if key == "" {
 		return mcp.NewToolResultError("key is required"), nil
@@ -138,6 +154,10 @@ func handleEditIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 
 	if summary != "" {
 		args = append(args, "-s", summary)
+		hasFields = true
+	}
+	if body != "" {
+		args = append(args, "-b", body)
 		hasFields = true
 	}
 	if priority != "" {
@@ -156,6 +176,18 @@ func handleEditIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 		args = append(args, "-l", l)
 		hasFields = true
 	}
+	for _, c := range components {
+		args = append(args, "-C", c)
+		hasFields = true
+	}
+	for _, v := range fixVersions {
+		args = append(args, "--fix-version", v)
+		hasFields = true
+	}
+	for _, v := range affectsVersions {
+		args = append(args, "--affects-version", v)
+		hasFields = true
+	}
 	if reqArgs := req.GetArguments(); reqArgs != nil {
 		if customRaw, ok := reqArgs["custom"]; ok {
 			if customMap, ok := customRaw.(map[string]any); ok {
@@ -168,7 +200,7 @@ func handleEditIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 	}
 
 	if !hasFields {
-		return mcp.NewToolResultError("no fields to update — provide at least one of: summary, priority, assignee, epic, labels, custom"), nil
+		return mcp.NewToolResultError("no fields to update — provide at least one of: summary, body, priority, assignee, epic, labels, components, fix_version, affects_version, custom"), nil
 	}
 
 	out, errOut, err := jiraRunner(ctx, args...)
@@ -412,4 +444,304 @@ func handleSearchUsers(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		}
 	}
 	return mcp.NewToolResultText(strings.TrimSpace(out.String())), nil
+}
+
+// handleCloneIssue duplicates a Jira issue with optional field overrides.
+func handleCloneIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+
+	args := []string{"issue", "clone", key}
+	if s := req.GetString("summary", ""); s != "" {
+		args = append(args, "-s", s)
+	}
+	if p := req.GetString("priority", ""); p != "" {
+		args = append(args, "-y", p)
+	}
+	if a := req.GetString("assignee", ""); a != "" {
+		args = append(args, "-a", a)
+	}
+	for _, l := range req.GetStringSlice("labels", nil) {
+		args = append(args, "-l", l)
+	}
+	for _, c := range req.GetStringSlice("components", nil) {
+		args = append(args, "-C", c)
+	}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to clone %s: %s\n%s", key, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleDeleteIssue deletes a Jira issue, optionally cascading to subtasks.
+func handleDeleteIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	cascade := req.GetBool("cascade", false)
+
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+
+	args := []string{"issue", "delete", key}
+	if cascade {
+		args = append(args, "--cascade")
+	}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to delete %s: %s\n%s", key, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleUnlinkIssues removes a link between two Jira issues.
+func handleUnlinkIssues(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	inward := req.GetString("inward", "")
+	outward := req.GetString("outward", "")
+
+	if inward == "" {
+		return mcp.NewToolResultError("inward is required"), nil
+	}
+	if outward == "" {
+		return mcp.NewToolResultError("outward is required"), nil
+	}
+
+	out, errOut, err := jiraRunner(ctx, "issue", "unlink", inward, outward)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to unlink %s from %s: %s\n%s", inward, outward, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleWatchIssue adds a watcher to a Jira issue.
+func handleWatchIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	watcher := req.GetString("watcher", "")
+
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+	if watcher == "" {
+		return mcp.NewToolResultError("watcher is required"), nil
+	}
+
+	out, errOut, err := jiraRunner(ctx, "issue", "watch", key, watcher)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to add watcher to %s: %s\n%s", key, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleAddWorklog logs time spent on a Jira issue.
+func handleAddWorklog(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	timeSpent := req.GetString("time_spent", "")
+
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+	if timeSpent == "" {
+		return mcp.NewToolResultError("time_spent is required"), nil
+	}
+
+	args := []string{"issue", "worklog", "add", key, timeSpent, "--no-input"}
+	if c := req.GetString("comment", ""); c != "" {
+		args = append(args, "--comment", c)
+	}
+	if s := req.GetString("started", ""); s != "" {
+		args = append(args, "--started", s)
+	}
+	if e := req.GetString("new_estimate", ""); e != "" {
+		args = append(args, "--new-estimate", e)
+	}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to add worklog to %s: %s\n%s", key, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleCreateEpic creates a Jira epic.
+func handleCreateEpic(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	name := req.GetString("name", "")
+	summary := req.GetString("summary", "")
+
+	if name == "" {
+		return mcp.NewToolResultError("name is required"), nil
+	}
+	if summary == "" {
+		return mcp.NewToolResultError("summary is required"), nil
+	}
+
+	args := []string{"epic", "create", "-n", name, "-s", summary, "--no-input"}
+	if b := req.GetString("body", ""); b != "" {
+		args = append(args, "-b", b)
+	}
+	if p := req.GetString("priority", ""); p != "" {
+		args = append(args, "-y", p)
+	}
+	if a := req.GetString("assignee", ""); a != "" {
+		args = append(args, "-a", a)
+	}
+	if proj := req.GetString("project", ""); proj != "" {
+		args = append(args, "-p", proj)
+	}
+	for _, l := range req.GetStringSlice("labels", nil) {
+		args = append(args, "-l", l)
+	}
+	for _, c := range req.GetStringSlice("components", nil) {
+		args = append(args, "-C", c)
+	}
+	if reqArgs := req.GetArguments(); reqArgs != nil {
+		if customRaw, ok := reqArgs["custom"]; ok {
+			if customMap, ok := customRaw.(map[string]any); ok {
+				for k, v := range customMap {
+					args = append(args, "--custom", fmt.Sprintf("%s=%v", k, v))
+				}
+			}
+		}
+	}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to create epic: %s\n%s", errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleListEpics lists epics or issues within an epic.
+func handleListEpics(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	jql := req.GetString("jql", "")
+	assignee := req.GetString("assignee", "")
+	priority := req.GetString("priority", "")
+	project := req.GetString("project", "")
+	statuses := req.GetStringSlice("status", nil)
+	labels := req.GetStringSlice("labels", nil)
+	limit := req.GetInt("limit", 50)
+
+	args := []string{"epic", "list"}
+	if key != "" {
+		args = append(args, key)
+	}
+	args = append(args, "--plain", "--no-truncate", "--columns", "TYPE,KEY,SUMMARY,STATUS,ASSIGNEE,PRIORITY")
+
+	if jql != "" {
+		args = append(args, "-q", jql)
+	} else {
+		if assignee != "" {
+			args = append(args, "-a", assignee)
+		}
+		if priority != "" {
+			args = append(args, "-y", priority)
+		}
+		if project != "" {
+			args = append(args, "-p", project)
+		}
+		for _, s := range statuses {
+			args = append(args, "-s", s)
+		}
+		for _, l := range labels {
+			args = append(args, "-l", l)
+		}
+	}
+	args = append(args, fmt.Sprintf("--paginate=%d", limit))
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to list epics: %s\n%s", errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleAddIssuesToEpic bulk-adds issues to an epic (max 50).
+func handleAddIssuesToEpic(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	epic := req.GetString("epic", "")
+	issues := req.GetStringSlice("issues", nil)
+
+	if epic == "" {
+		return mcp.NewToolResultError("epic is required"), nil
+	}
+	if len(issues) == 0 {
+		return mcp.NewToolResultError("issues is required"), nil
+	}
+
+	args := []string{"epic", "add", epic}
+	args = append(args, issues...)
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to add issues to %s: %s\n%s", epic, errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleRemoveIssuesFromEpic removes the epic link from issues.
+func handleRemoveIssuesFromEpic(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	issues := req.GetStringSlice("issues", nil)
+
+	if len(issues) == 0 {
+		return mcp.NewToolResultError("issues is required"), nil
+	}
+
+	args := []string{"epic", "remove"}
+	args = append(args, issues...)
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to remove issues from epic: %s\n%s", errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleListSprints lists sprints in the project board.
+func handleListSprints(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	state := req.GetString("state", "")
+	project := req.GetString("project", "")
+
+	args := []string{"sprint", "list", "--table", "--plain", "--no-headers", "--columns", "ID,NAME,START,END,STATE"}
+	if state != "" {
+		args = append(args, "--state", state)
+	}
+	if project != "" {
+		args = append(args, "-p", project)
+	}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to list sprints: %s\n%s", errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleListBoards lists Jira boards.
+func handleListBoards(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	project := req.GetString("project", "")
+
+	args := []string{"board", "list", "--plain", "--no-headers"}
+	if project != "" {
+		args = append(args, "-p", project)
+	}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to list boards: %s\n%s", errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleListProjects lists Jira projects.
+func handleListProjects(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	args := []string{"project", "list", "--plain", "--no-headers"}
+
+	out, errOut, err := jiraRunner(ctx, args...)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to list projects: %s\n%s", errOut, out)), nil
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
 }
