@@ -19,7 +19,7 @@ The headline feature is `create_issue` — a single tool call that creates an is
 
 ## Why jira-cli?
 
-[jira-cli](https://github.com/ankitpokhrel/jira-cli) is the de facto command-line tool for Jira — 4k+ stars, [sponsored by Atlassian](https://github.com/ankitpokhrel/jira-cli#supporters), and supports both Cloud and Server/Data Center. It already handles sprints, epics, boards, cloning, linking, worklogs, and custom fields. Atlassian doesn't ship a competing CLI.
+[jira-cli](https://github.com/ankitpokhrel/jira-cli) is the de facto command-line tool for Jira — 4k+ stars, [sponsored by Atlassian](https://github.com/ankitpokhrel/jira-cli#supporters), and supports both Cloud and Server/Data Center. It already handles sprints, epics, boards, cloning, linking, worklogs, and custom fields. Atlassian doesn't ship a Jira CLI.
 
 gojira-mcp gives AI assistants structured access to all of that. Rather than reimplementing the Jira API, it wraps a proven tool and adds compound operations on top — a single `create_issue` call that creates, assigns, links to an epic, transitions status, and adds to a sprint.
 
