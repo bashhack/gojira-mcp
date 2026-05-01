@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -140,7 +141,7 @@ func TestFindActiveSprint(t *testing.T) {
 			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
 			t.Cleanup(func() { jiraRunner = defaultRunJira })
 
-			id, err := findActiveSprint(context.Background())
+			id, err := findActiveSprint(context.Background(), "")
 			if tc.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -154,5 +155,31 @@ func TestFindActiveSprint(t *testing.T) {
 				t.Errorf("got %q, want %q", id, tc.wantID)
 			}
 		})
+	}
+}
+
+func TestFindActiveSprintWithProject(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{
+			{stdout: "9999\n"},
+		},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	id, err := findActiveSprint(context.Background(), "PRO")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != "9999" {
+		t.Errorf("got %q, want 9999", id)
+	}
+
+	if len(runner.calls) == 0 {
+		t.Fatal("no calls recorded")
+	}
+	args := strings.Join(runner.calls[0].args, " ")
+	if !strings.Contains(args, "-p PRO") {
+		t.Errorf("args missing project flag\nfull args: %s", args)
 	}
 }

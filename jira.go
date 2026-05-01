@@ -51,9 +51,14 @@ func isIssueKey(s string) bool {
 }
 
 // findActiveSprint queries jira-cli for the currently active sprint
-// and returns its ID. Returns an error if no active sprint exists.
-func findActiveSprint(ctx context.Context) (string, error) {
-	out, errOut, err := jiraRunner(ctx, "sprint", "list", "--state", "active", "--plain", "--no-headers", "--columns", "ID")
+// and returns its ID. When project is non-empty, the query is scoped
+// to that project's board. Returns an error if no active sprint exists.
+func findActiveSprint(ctx context.Context, project string) (string, error) {
+	args := []string{"sprint", "list", "--state", "active", "--plain", "--no-headers", "--columns", "ID"}
+	if project != "" {
+		args = append(args, "-p", project)
+	}
+	out, errOut, err := jiraRunner(ctx, args...)
 	if err != nil {
 		return "", fmt.Errorf("failed to list sprints: %s %s", errOut, err)
 	}
