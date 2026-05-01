@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -50,6 +52,15 @@ func handleCreateIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	}
 	for _, l := range labels {
 		args = append(args, "-l", l)
+	}
+	if reqArgs := req.GetArguments(); reqArgs != nil {
+		if customRaw, ok := reqArgs["custom"]; ok {
+			if customMap, ok := customRaw.(map[string]any); ok {
+				for k, v := range customMap {
+					args = append(args, "--custom", fmt.Sprintf("%s=%v", k, v))
+				}
+			}
+		}
 	}
 
 	out, errOut, err := jiraRunner(ctx, args...)
@@ -145,9 +156,19 @@ func handleEditIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 		args = append(args, "-l", l)
 		hasFields = true
 	}
+	if reqArgs := req.GetArguments(); reqArgs != nil {
+		if customRaw, ok := reqArgs["custom"]; ok {
+			if customMap, ok := customRaw.(map[string]any); ok {
+				for k, v := range customMap {
+					args = append(args, "--custom", fmt.Sprintf("%s=%v", k, v))
+					hasFields = true
+				}
+			}
+		}
+	}
 
 	if !hasFields {
-		return mcp.NewToolResultError("no fields to update — provide at least one of: summary, priority, assignee, epic, labels"), nil
+		return mcp.NewToolResultError("no fields to update — provide at least one of: summary, priority, assignee, epic, labels, custom"), nil
 	}
 
 	out, errOut, err := jiraRunner(ctx, args...)
@@ -344,4 +365,50 @@ func handleAddToSprint(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		label = sprintID + " (active)"
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Added %s to sprint %s", key, label)), nil
+}
+
+// jiraUser represents a user returned by the Jira REST API.
+type jiraUser struct {
+	AccountID    string `json:"accountId"`
+	DisplayName  string `json:"displayName"`
+	EmailAddress string `json:"emailAddress"`
+}
+
+// handleSearchUsers searches for Jira users by name, email, or username.
+func handleSearchUsers(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	query := req.GetString("query", "")
+	project := req.GetString("project", "")
+
+	if query == "" {
+		return mcp.NewToolResultError("query is required"), nil
+	}
+
+	path := "/rest/api/3/user/assignable/search?query=" + url.QueryEscape(query)
+	if project != "" {
+		path += "&project=" + url.QueryEscape(project)
+	}
+
+	body, err := jiraAPIFetcher(ctx, "GET", path)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to search users: %s", err)), nil
+	}
+
+	var users []jiraUser
+	if err := json.Unmarshal(body, &users); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to parse user search response: %s", err)), nil
+	}
+
+	if len(users) == 0 {
+		return mcp.NewToolResultText(fmt.Sprintf("No users found matching %q", query)), nil
+	}
+
+	var out strings.Builder
+	for _, u := range users {
+		if u.EmailAddress != "" {
+			fmt.Fprintf(&out, "%s <%s> (accountId: %s)\n", u.DisplayName, u.EmailAddress, u.AccountID)
+		} else {
+			fmt.Fprintf(&out, "%s (accountId: %s)\n", u.DisplayName, u.AccountID)
+		}
+	}
+	return mcp.NewToolResultText(strings.TrimSpace(out.String())), nil
 }
