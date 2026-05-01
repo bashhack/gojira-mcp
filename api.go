@@ -40,7 +40,7 @@ func loadJiraConfig() (cfg jiraConfig, retErr error) {
 		path = filepath.Join(home, ".config", ".jira", ".config.yml")
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return jiraConfig{}, fmt.Errorf("cannot open jira config %s: %w", path, err)
 	}
@@ -88,7 +88,7 @@ func defaultJiraAPIFetch(ctx context.Context, method, path string) (_ []byte, re
 		return nil, fmt.Errorf("JIRA_API_TOKEN environment variable not set")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, cfg.server+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, cfg.server+path, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
