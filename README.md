@@ -17,24 +17,11 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants struc
 
 The headline feature is `create_issue` — a single tool call that creates an issue **and** assigns it, links it to an epic, transitions its status, and adds it to a sprint. No more chaining five shell commands with fragile escaping.
 
-## Why not the official Atlassian MCP?
+## vs. the official Atlassian MCP
 
-Atlassian ships a [Rovo MCP Server](https://github.com/atlassian/atlassian-mcp-server) — a cloud-hosted proxy at `mcp.atlassian.com` with 41 tools across Jira (14), Confluence (12), and Compass (10). It's the right choice if you need Confluence/Compass support or enterprise OAuth 2.1. But for Jira-heavy workflows, the two tools are designed for different jobs.
+Atlassian's [Rovo MCP Server](https://github.com/atlassian/atlassian-mcp-server) covers Jira, Confluence, and Compass — if you need breadth across Atlassian products, start there.
 
-### Jira capabilities compared
-
-Both cover the basics (create, edit, transition, search, comment, worklog, user lookup). The differences:
-
-| Workflow | Rovo MCP | gojira-mcp |
-|---|---|---|
-| Issue creation | single-step | compound: create + assign + epic + sprint + status in one call |
-| Sprint planning | -- | `list_sprints`, `add_to_sprint` |
-| Epic management | -- | create, list, add/remove issues |
-| Issue linking | read-only | `link_issues`, `unlink_issues` |
-| Clone / delete | -- | `clone_issue`, `delete_issue` |
-| Field metadata | 3 discovery tools | -- |
-
-**Choose Rovo MCP** if you need Confluence/Compass integration or enterprise OAuth 2.1 with audit logging. **Choose gojira-mcp** if your workflow is Jira-heavy and you want sprint planning, epic management, and compound operations — especially on Server/Data Center or without rate limits.
+gojira-mcp wraps [jira-cli](https://github.com/ankitpokhrel/jira-cli), a mature CLI that already handles the full Jira workflow: sprints, epics, boards, cloning, linking, worklogs, custom fields, and both Cloud and Server/Data Center. gojira-mcp exposes all of that as structured MCP tools and adds compound operations — a single `create_issue` call that creates, assigns, links to an epic, transitions status, and adds to a sprint. No chaining, no escaping, no five separate API calls.
 
 ## Prerequisites
 
