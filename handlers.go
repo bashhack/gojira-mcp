@@ -77,7 +77,7 @@ func handleCreateIssue(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	if sprint != "" {
 		sprintID := sprint
 		if sprint == "active" {
-			id, err := findActiveSprint(ctx)
+			id, err := findActiveSprint(ctx, project)
 			if err != nil {
 				report.WriteString(fmt.Sprintf("  Sprint: active -- FAILED: %s\n", err))
 				sprintID = ""
@@ -317,6 +317,7 @@ func handleLinkIssues(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
 func handleAddToSprint(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
 	key := req.GetString("key", "")
 	sprint := req.GetString("sprint", "")
+	project := req.GetString("project", "")
 
 	if key == "" {
 		return mcp.NewToolResultError("key is required"), nil
@@ -327,7 +328,7 @@ func handleAddToSprint(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 
 	sprintID := sprint
 	if sprint == "active" {
-		id, err := findActiveSprint(ctx)
+		id, err := findActiveSprint(ctx, project)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to find active sprint: %s", err)), nil
 		}

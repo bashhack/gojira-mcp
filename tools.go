@@ -72,6 +72,7 @@ var addToSprintTool = mcp.NewTool("add_to_sprint",
 	mcp.WithDescription("Add a Jira issue to a sprint."),
 	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
 	mcp.WithString("sprint", mcp.Required(), mcp.Description("Sprint ID, or 'active' to auto-detect")),
+	mcp.WithString("project", mcp.Description("Project key — required when using 'active' with a non-default project")),
 )
 
 var assignIssueTool = mcp.NewTool("assign_issue",
