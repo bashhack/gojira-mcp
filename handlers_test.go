@@ -180,15 +180,19 @@ func TestHandleCreateIssueBuildArgs(t *testing.T) {
 	t.Cleanup(func() { jiraRunner = defaultRunJira })
 
 	req := makeCallToolRequest(t, map[string]any{
-		"summary":     "Test args",
-		"type":        "Story",
-		"description": "A long\nmultiline\ndescription",
-		"priority":    "High",
-		"assignee":    "bob@example.com",
-		"epic":        "TEST-1",
-		"project":     "TEST",
-		"labels":      []any{"sec", "api"},
-		"custom":      map[string]any{"story-points": "5"},
+		"summary":           "Test args",
+		"type":              "Story",
+		"description":       "A long\nmultiline\ndescription",
+		"priority":          "High",
+		"assignee":          "bob@example.com",
+		"epic":              "TEST-1",
+		"project":           "TEST",
+		"labels":            []any{"sec", "api"},
+		"components":        []any{"Backend"},
+		"fix_version":       []any{"v2.0"},
+		"affects_version":   []any{"v1.9"},
+		"original_estimate": "3d",
+		"custom":            map[string]any{"story-points": "5"},
 	})
 
 	if _, err := handleCreateIssue(context.Background(), req); err != nil {
@@ -200,7 +204,7 @@ func TestHandleCreateIssueBuildArgs(t *testing.T) {
 	}
 	args := strings.Join(runner.calls[0].args, " ")
 
-	for _, want := range []string{"-t Story", "-s Test args", "-b A long\nmultiline\ndescription", "-y High", "-a bob@example.com", "-P TEST-1", "-p TEST", "-l sec", "-l api", "--custom story-points=5"} {
+	for _, want := range []string{"-t Story", "-s Test args", "-b A long\nmultiline\ndescription", "-y High", "-a bob@example.com", "-P TEST-1", "-p TEST", "-l sec", "-l api", "-C Backend", "--fix-version v2.0", "--affects-version v1.9", "-e 3d", "--custom story-points=5"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q\nfull args: %s", want, args)
 		}
@@ -1574,6 +1578,22 @@ func TestHandleListSprints(t *testing.T) {
 	}
 }
 
+func TestHandleListSprintsError(t *testing.T) {
+	jiraRunner = fakeRunner("", "board not found", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListSprints(context.Background(), makeCallToolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	if !strings.Contains(resultText(t, result), "Failed to list sprints") {
+		t.Errorf("unexpected error: %s", resultText(t, result))
+	}
+}
+
 func TestHandleListBoards(t *testing.T) {
 	runner := &sequenceRunner{
 		responses: []fakeResponse{{stdout: "156\tPLAT board\tscrum\n"}},
@@ -1598,6 +1618,19 @@ func TestHandleListBoards(t *testing.T) {
 	}
 }
 
+func TestHandleListBoardsError(t *testing.T) {
+	jiraRunner = fakeRunner("", "error", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListBoards(context.Background(), makeCallToolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+}
+
 func TestHandleListProjects(t *testing.T) {
 	jiraRunner = fakeRunner("PLAT\tPlatform\nPRO\tPresence\n", "", nil)
 	t.Cleanup(func() { jiraRunner = defaultRunJira })
@@ -1609,6 +1642,47 @@ func TestHandleListProjects(t *testing.T) {
 	text := resultText(t, result)
 	if !strings.Contains(text, "PLAT") || !strings.Contains(text, "PRO") {
 		t.Errorf("expected projects in output, got: %s", text)
+	}
+}
+
+func TestHandleListProjectsError(t *testing.T) {
+	jiraRunner = fakeRunner("", "error", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListProjects(context.Background(), makeCallToolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+}
+
+func TestHandleRemoveIssuesFromEpicError(t *testing.T) {
+	jiraRunner = fakeRunner("", "epic not found", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleRemoveIssuesFromEpic(context.Background(), makeCallToolRequest(t, map[string]any{
+		"issues": []any{"TEST-1"},
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+}
+
+func TestHandleListEpicsError(t *testing.T) {
+	jiraRunner = fakeRunner("", "project not found", errFake)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListEpics(context.Background(), makeCallToolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
 	}
 }
 
