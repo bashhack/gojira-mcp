@@ -17,11 +17,13 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants struc
 
 The headline feature is `create_issue` — a single tool call that creates an issue **and** assigns it, links it to an epic, transitions its status, and adds it to a sprint. No more chaining five shell commands with fragile escaping.
 
-## vs. the official Atlassian MCP
+## Why jira-cli?
 
-Atlassian's [Rovo MCP Server](https://github.com/atlassian/atlassian-mcp-server) covers Jira, Confluence, and Compass — if you need breadth across Atlassian products, start there.
+[jira-cli](https://github.com/ankitpokhrel/jira-cli) is the de facto command-line tool for Jira — 4k+ stars, [sponsored by Atlassian](https://github.com/ankitpokhrel/jira-cli#supporters), and supports both Cloud and Server/Data Center. It already handles sprints, epics, boards, cloning, linking, worklogs, and custom fields. Atlassian doesn't ship a competing CLI.
 
-gojira-mcp wraps [jira-cli](https://github.com/ankitpokhrel/jira-cli), a mature CLI that already handles the full Jira workflow: sprints, epics, boards, cloning, linking, worklogs, custom fields, and both Cloud and Server/Data Center. gojira-mcp exposes all of that as structured MCP tools and adds compound operations — a single `create_issue` call that creates, assigns, links to an epic, transitions status, and adds to a sprint. No chaining, no escaping, no five separate API calls.
+gojira-mcp gives AI assistants structured access to all of that. Rather than reimplementing the Jira API, it wraps a proven tool and adds compound operations on top — a single `create_issue` call that creates, assigns, links to an epic, transitions status, and adds to a sprint.
+
+If you need Confluence or Compass alongside Jira, see Atlassian's [Rovo MCP Server](https://github.com/atlassian/atlassian-mcp-server).
 
 ## Prerequisites
 
