@@ -17,6 +17,25 @@ An [MCP](https://modelcontextprotocol.io/) server that gives AI assistants struc
 
 The headline feature is `create_issue` — a single tool call that creates an issue **and** assigns it, links it to an epic, transitions its status, and adds it to a sprint. No more chaining five shell commands with fragile escaping.
 
+## Why not the official Atlassian MCP?
+
+Atlassian ships a [Rovo MCP Server](https://github.com/atlassian/atlassian-mcp-server) — a cloud-hosted proxy at `mcp.atlassian.com` with 41 tools across Jira (14), Confluence (12), and Compass (10). It's the right choice if you need Confluence/Compass support or enterprise OAuth 2.1. But for Jira-heavy workflows, the two tools are designed for different jobs.
+
+### Jira capabilities compared
+
+Both cover the basics (create, edit, transition, search, comment, worklog, user lookup). The differences:
+
+| Workflow | Rovo MCP | gojira-mcp |
+|---|---|---|
+| Issue creation | single-step | compound: create + assign + epic + sprint + status in one call |
+| Sprint planning | -- | `list_sprints`, `add_to_sprint` |
+| Epic management | -- | create, list, add/remove issues |
+| Issue linking | read-only | `link_issues`, `unlink_issues` |
+| Clone / delete | -- | `clone_issue`, `delete_issue` |
+| Field metadata | 3 discovery tools | -- |
+
+**Choose Rovo MCP** if you need Confluence/Compass integration or enterprise OAuth 2.1 with audit logging. **Choose gojira-mcp** if your workflow is Jira-heavy and you want sprint planning, epic management, and compound operations — especially on Server/Data Center or without rate limits.
+
 ## Prerequisites
 
 - [jira-cli](https://github.com/ankitpokhrel/jira-cli) installed and configured (`jira init`)
@@ -90,7 +109,7 @@ Verify it's connected:
 /mcp
 ```
 
-The `jira` server should show as healthy with 7 tools.
+The `jira` server should show as healthy with 22 tools.
 
 ## Usage
 
@@ -140,6 +159,10 @@ Create a Jira issue with optional assignment, epic linkage, status transition, a
 | `sprint`      | string   | no       | Sprint ID, or `active` to auto-detect           |
 | `project`     | string   | no       | Project key override                            |
 | `labels`      | string[] | no       | Labels to apply                                 |
+| `components`  | string[] | no       | Components to set                               |
+| `fix_version` | string[] | no       | Fix version(s) to set                           |
+| `affects_version` | string[] | no   | Affects version(s) to set                       |
+| `original_estimate` | string | no   | Time estimate, e.g. `2d 1h 30m`                |
 | `custom`      | object   | no       | Custom fields as key-value pairs (see below)    |
 
 Post-creation steps (status, sprint) are best-effort — failures are reported but don't prevent the issue from being created.
@@ -169,11 +192,37 @@ Update fields on an existing issue.
 |------------|----------|----------|-------------------|
 | `key`      | string   | yes      | e.g. `PROJ-123`   |
 | `summary`  | string   | no       | New summary       |
+| `body`     | string   | no       | New description   |
 | `priority` | string   | no       | New priority      |
 | `assignee` | string   | no       | New assignee      |
 | `epic`     | string   | no       | Parent epic key   |
 | `labels`   | string[] | no       | Labels to add     |
+| `components` | string[] | no     | Components to replace |
+| `fix_version` | string[] | no    | Fix version(s) to add |
+| `affects_version` | string[] | no | Affects version(s) to add |
 | `custom`   | object   | no       | Custom fields as key-value pairs |
+
+### `clone_issue`
+
+Clone a Jira issue, optionally overriding fields on the copy.
+
+| Parameter    | Type     | Required | Description                    |
+|--------------|----------|----------|--------------------------------|
+| `key`        | string   | yes      | Issue key to clone             |
+| `summary`    | string   | no       | Override summary               |
+| `priority`   | string   | no       | Override priority              |
+| `assignee`   | string   | no       | Override assignee              |
+| `labels`     | string[] | no       | Override labels                |
+| `components` | string[] | no       | Override components            |
+
+### `delete_issue`
+
+Delete a Jira issue. Use cascade to also delete subtasks.
+
+| Parameter | Type   | Required | Description                          |
+|-----------|--------|----------|--------------------------------------|
+| `key`     | string | yes      | e.g. `PROJ-123`                      |
+| `cascade` | bool   | no       | Also delete subtasks (default false) |
 
 ### `move_issue`
 
@@ -245,6 +294,105 @@ Example:
 
 Aaron Maturen <aaron@example.com> (accountId: 5f3c...)
 ```
+
+### `unlink_issues`
+
+Remove a link between two Jira issues.
+
+| Parameter | Type   | Required | Description                              |
+|-----------|--------|----------|------------------------------------------|
+| `inward`  | string | yes      | Issue key for the inward side            |
+| `outward` | string | yes      | Issue key for the outward side           |
+
+### `watch_issue`
+
+Add a watcher to a Jira issue.
+
+| Parameter | Type   | Required | Description                    |
+|-----------|--------|----------|--------------------------------|
+| `key`     | string | yes      | e.g. `PROJ-123`                |
+| `watcher` | string | yes      | Watcher email or display name  |
+
+### `add_worklog`
+
+Log time spent on a Jira issue.
+
+| Parameter      | Type   | Required | Description                    |
+|----------------|--------|----------|--------------------------------|
+| `key`          | string | yes      | e.g. `PROJ-123`                |
+| `time_spent`   | string | yes      | e.g. `2d 1h 30m`              |
+| `comment`      | string | no       | Worklog comment                |
+| `started`      | string | no       | When work started              |
+| `new_estimate` | string | no       | New remaining estimate         |
+
+### `create_epic`
+
+Create a Jira epic.
+
+| Parameter    | Type     | Required | Description                    |
+|--------------|----------|----------|--------------------------------|
+| `name`       | string   | yes      | Epic name                      |
+| `summary`    | string   | yes      | Epic summary                   |
+| `body`       | string   | no       | Epic description               |
+| `priority`   | string   | no       | Priority                       |
+| `assignee`   | string   | no       | Assignee email or username     |
+| `project`    | string   | no       | Project key override           |
+| `labels`     | string[] | no       | Labels to apply                |
+| `components` | string[] | no       | Components to set              |
+| `custom`     | object   | no       | Custom fields                  |
+
+### `list_epics`
+
+List epics, or list issues within an epic.
+
+| Parameter  | Type     | Required | Description                              |
+|------------|----------|----------|------------------------------------------|
+| `key`      | string   | no       | Epic key to list issues for              |
+| `assignee` | string   | no       | Filter by assignee                       |
+| `priority` | string   | no       | Filter by priority                       |
+| `jql`      | string   | no       | Raw JQL query                            |
+| `project`  | string   | no       | Project key override                     |
+| `status`   | string[] | no       | Filter by status                         |
+| `labels`   | string[] | no       | Filter by labels                         |
+| `limit`    | number   | no       | Max results (default 50)                 |
+
+### `add_issues_to_epic`
+
+Add issues to an epic (max 50).
+
+| Parameter | Type     | Required | Description                    |
+|-----------|----------|----------|--------------------------------|
+| `epic`    | string   | yes      | Epic key, e.g. `PROJ-100`     |
+| `issues`  | string[] | yes      | Issue keys to add              |
+
+### `remove_issues_from_epic`
+
+Remove the epic link from issues (max 50).
+
+| Parameter | Type     | Required | Description                    |
+|-----------|----------|----------|--------------------------------|
+| `issues`  | string[] | yes      | Issue keys to remove           |
+
+### `list_sprints`
+
+List sprints in the project board.
+
+| Parameter | Type   | Required | Description                              |
+|-----------|--------|----------|------------------------------------------|
+| `state`   | string | no       | Filter: `future`, `active`, `closed`     |
+| `project` | string | no       | Project key override                     |
+
+### `list_boards`
+
+List Jira boards.
+
+| Parameter | Type   | Required | Description                    |
+|-----------|--------|----------|--------------------------------|
+| `project` | string | no       | Project key override           |
+
+### `list_projects`
+
+List Jira projects. No parameters.
 
 ## How it works
 

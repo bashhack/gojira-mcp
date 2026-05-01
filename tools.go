@@ -21,6 +21,10 @@ var createIssueTool = mcp.NewTool("create_issue",
 	mcp.WithString("sprint", mcp.Description("Sprint ID, or 'active' to auto-detect the active sprint")),
 	mcp.WithString("project", mcp.Description("Project key override")),
 	mcp.WithArray("labels", mcp.Description("Labels to apply")),
+	mcp.WithArray("components", mcp.Description("Components to set")),
+	mcp.WithArray("fix_version", mcp.Description("Fix version(s) to set")),
+	mcp.WithArray("affects_version", mcp.Description("Affects version(s) to set")),
+	mcp.WithString("original_estimate", mcp.Description("Time estimate, e.g. '2d 1h 30m'")),
 	mcp.WithObject("custom", mcp.Description("Custom fields as key-value pairs, e.g. {\"story-points\": \"5\"}"), mcp.AdditionalProperties(true)),
 )
 
@@ -28,10 +32,14 @@ var editIssueTool = mcp.NewTool("edit_issue",
 	mcp.WithDescription("Update fields on an existing Jira issue."),
 	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
 	mcp.WithString("summary", mcp.Description("New summary")),
+	mcp.WithString("body", mcp.Description("New description")),
 	mcp.WithString("priority", mcp.Description("New priority")),
 	mcp.WithString("assignee", mcp.Description("New assignee")),
 	mcp.WithString("epic", mcp.Description("Parent epic key")),
 	mcp.WithArray("labels", mcp.Description("Labels to add")),
+	mcp.WithArray("components", mcp.Description("Components to replace")),
+	mcp.WithArray("fix_version", mcp.Description("Fix version(s) to add")),
+	mcp.WithArray("affects_version", mcp.Description("Affects version(s) to add")),
 	mcp.WithObject("custom", mcp.Description("Custom fields as key-value pairs, e.g. {\"story-points\": \"5\"}"), mcp.AdditionalProperties(true)),
 )
 
@@ -96,4 +104,101 @@ var searchUsersTool = mcp.NewTool("search_users",
 	mcp.WithDestructiveHintAnnotation(false),
 	mcp.WithString("query", mcp.Required(), mcp.Description("Search string: partial name, email, or username")),
 	mcp.WithString("project", mcp.Description("Project key to scope results to assignable users")),
+)
+
+var cloneIssueTool = mcp.NewTool("clone_issue",
+	mcp.WithDescription("Clone a Jira issue, optionally overriding fields on the copy."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key to clone, e.g. PROJ-123")),
+	mcp.WithString("summary", mcp.Description("Override summary on the clone")),
+	mcp.WithString("priority", mcp.Description("Override priority")),
+	mcp.WithString("assignee", mcp.Description("Override assignee")),
+	mcp.WithArray("labels", mcp.Description("Override labels")),
+	mcp.WithArray("components", mcp.Description("Override components")),
+)
+
+var deleteIssueTool = mcp.NewTool("delete_issue",
+	mcp.WithDescription("Delete a Jira issue. Use cascade to also delete subtasks."),
+	mcp.WithDestructiveHintAnnotation(true),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithBoolean("cascade", mcp.Description("Also delete subtasks (default false)")),
+)
+
+var unlinkIssuesTool = mcp.NewTool("unlink_issues",
+	mcp.WithDescription("Remove a link between two Jira issues."),
+	mcp.WithString("inward", mcp.Required(), mcp.Description("Issue key for the inward side, e.g. PROJ-123")),
+	mcp.WithString("outward", mcp.Required(), mcp.Description("Issue key for the outward side, e.g. PROJ-456")),
+)
+
+var watchIssueTool = mcp.NewTool("watch_issue",
+	mcp.WithDescription("Add a watcher to a Jira issue."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithString("watcher", mcp.Required(), mcp.Description("Watcher email or display name")),
+)
+
+var addWorklogTool = mcp.NewTool("add_worklog",
+	mcp.WithDescription("Log time spent on a Jira issue."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithString("time_spent", mcp.Required(), mcp.Description("Time spent, e.g. '2d 1h 30m'")),
+	mcp.WithString("comment", mcp.Description("Worklog comment")),
+	mcp.WithString("started", mcp.Description("When work started (datetime string)")),
+	mcp.WithString("new_estimate", mcp.Description("New remaining estimate")),
+)
+
+var createEpicTool = mcp.NewTool("create_epic",
+	mcp.WithDescription("Create a Jira epic."),
+	mcp.WithString("name", mcp.Required(), mcp.Description("Epic name")),
+	mcp.WithString("summary", mcp.Required(), mcp.Description("Epic summary")),
+	mcp.WithString("body", mcp.Description("Epic description")),
+	mcp.WithString("priority", mcp.Description("Priority")),
+	mcp.WithString("assignee", mcp.Description("Assignee email or username")),
+	mcp.WithString("project", mcp.Description("Project key override")),
+	mcp.WithArray("labels", mcp.Description("Labels to apply")),
+	mcp.WithArray("components", mcp.Description("Components to set")),
+	mcp.WithObject("custom", mcp.Description("Custom fields as key-value pairs"), mcp.AdditionalProperties(true)),
+)
+
+var listEpicsTool = mcp.NewTool("list_epics",
+	mcp.WithDescription("List epics, or list issues in an epic."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("key", mcp.Description("Epic key to list issues for (omit to list epics)")),
+	mcp.WithString("assignee", mcp.Description("Filter by assignee")),
+	mcp.WithString("priority", mcp.Description("Filter by priority")),
+	mcp.WithString("jql", mcp.Description("Raw JQL query")),
+	mcp.WithString("project", mcp.Description("Project key override")),
+	mcp.WithArray("status", mcp.Description("Filter by status")),
+	mcp.WithArray("labels", mcp.Description("Filter by labels")),
+	mcp.WithNumber("limit", mcp.Description("Max results (default 50)")),
+)
+
+var addIssuesToEpicTool = mcp.NewTool("add_issues_to_epic",
+	mcp.WithDescription("Add issues to an epic (max 50)."),
+	mcp.WithString("epic", mcp.Required(), mcp.Description("Epic key, e.g. PROJ-100")),
+	mcp.WithArray("issues", mcp.Required(), mcp.Description("Issue keys to add")),
+)
+
+var removeIssuesFromEpicTool = mcp.NewTool("remove_issues_from_epic",
+	mcp.WithDescription("Remove the epic link from issues (max 50)."),
+	mcp.WithArray("issues", mcp.Required(), mcp.Description("Issue keys to remove from their epic")),
+)
+
+var listSprintsTool = mcp.NewTool("list_sprints",
+	mcp.WithDescription("List sprints in the project board."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("state", mcp.Description("Filter by state: future, active, closed (comma-separated)")),
+	mcp.WithString("project", mcp.Description("Project key override")),
+)
+
+var listBoardsTool = mcp.NewTool("list_boards",
+	mcp.WithDescription("List Jira boards."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
+	mcp.WithString("project", mcp.Description("Project key override")),
+)
+
+var listProjectsTool = mcp.NewTool("list_projects",
+	mcp.WithDescription("List Jira projects."),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithDestructiveHintAnnotation(false),
 )

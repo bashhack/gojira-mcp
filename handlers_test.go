@@ -318,6 +318,39 @@ func TestHandleEditIssueCustomFields(t *testing.T) {
 	}
 }
 
+func TestHandleEditIssueBuildArgs(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "✓ Issue updated\n"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	req := makeCallToolRequest(t, map[string]any{
+		"key":             "TEST-1",
+		"summary":         "New title",
+		"body":            "New description",
+		"priority":        "High",
+		"assignee":        "alice@example.com",
+		"epic":            "TEST-50",
+		"labels":          []any{"backend"},
+		"components":      []any{"API", "DB"},
+		"fix_version":     []any{"v2.0"},
+		"affects_version": []any{"v1.9"},
+		"custom":          map[string]any{"story-points": "3"},
+	})
+
+	if _, err := handleEditIssue(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	for _, want := range []string{"-s New title", "-b New description", "-y High", "-a alice@example.com", "-P TEST-50", "-l backend", "-C API", "-C DB", "--fix-version v2.0", "--affects-version v1.9", "--custom story-points=3"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\nfull args: %s", want, args)
+		}
+	}
+}
+
 func TestHandleEditIssueNoFields(t *testing.T) {
 	result, err := handleEditIssue(context.Background(), makeCallToolRequest(t, map[string]any{"key": "TEST-1"}))
 	if err != nil {
@@ -940,6 +973,642 @@ func TestHandleSearchUsersAPIPath(t *testing.T) {
 	}
 	if !strings.Contains(capturedPath, "query=alice") {
 		t.Errorf("path missing query param: %s", capturedPath)
+	}
+}
+
+func TestHandleCloneIssue(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"clone succeeds": {
+			params:     map[string]any{"key": "TEST-1", "summary": "Cloned issue"},
+			stdout:     "✓ Issue cloned\nhttps://example.atlassian.net/browse/TEST-200\n",
+			wantInText: "Issue cloned",
+		},
+		"clone fails": {
+			params:     map[string]any{"key": "TEST-999"},
+			stderr:     "not found",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to clone",
+		},
+		"missing key": {
+			params:     map[string]any{},
+			wantErr:    true,
+			wantInText: "key is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleCloneIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleCloneIssueBuildArgs(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "https://example.atlassian.net/browse/TEST-201\n"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	req := makeCallToolRequest(t, map[string]any{
+		"key":        "TEST-1",
+		"summary":    "Cloned",
+		"priority":   "Low",
+		"assignee":   "bob@example.com",
+		"labels":     []any{"clone"},
+		"components": []any{"API"},
+	})
+
+	if _, err := handleCloneIssue(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	for _, want := range []string{"issue clone TEST-1", "-s Cloned", "-y Low", "-a bob@example.com", "-l clone", "-C API"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\nfull args: %s", want, args)
+		}
+	}
+}
+
+func TestHandleDeleteIssue(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"delete succeeds": {
+			params:     map[string]any{"key": "TEST-1"},
+			stdout:     "✓ Issue deleted",
+			wantInText: "Issue deleted",
+		},
+		"delete with cascade": {
+			params:     map[string]any{"key": "TEST-1", "cascade": true},
+			stdout:     "✓ Issue deleted",
+			wantInText: "Issue deleted",
+		},
+		"delete fails": {
+			params:     map[string]any{"key": "TEST-1"},
+			stderr:     "permission denied",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to delete",
+		},
+		"missing key": {
+			params:     map[string]any{},
+			wantErr:    true,
+			wantInText: "key is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleDeleteIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleDeleteIssueCascadeArgs(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "deleted"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	if _, err := handleDeleteIssue(context.Background(), makeCallToolRequest(t, map[string]any{"key": "TEST-1", "cascade": true})); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	if !strings.Contains(args, "--cascade") {
+		t.Errorf("args missing --cascade\nfull args: %s", args)
+	}
+}
+
+func TestHandleUnlinkIssues(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"unlink succeeds": {
+			params:     map[string]any{"inward": "TEST-1", "outward": "TEST-2"},
+			stdout:     "✓ Issues unlinked",
+			wantInText: "Issues unlinked",
+		},
+		"unlink fails": {
+			params:     map[string]any{"inward": "TEST-1", "outward": "TEST-2"},
+			stderr:     "link not found",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to unlink",
+		},
+		"missing inward": {
+			params:     map[string]any{"outward": "TEST-2"},
+			wantErr:    true,
+			wantInText: "inward is required",
+		},
+		"missing outward": {
+			params:     map[string]any{"inward": "TEST-1"},
+			wantErr:    true,
+			wantInText: "outward is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleUnlinkIssues(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleWatchIssue(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"watch succeeds": {
+			params:     map[string]any{"key": "TEST-1", "watcher": "alice@example.com"},
+			stdout:     "✓ Watcher added",
+			wantInText: "Watcher added",
+		},
+		"watch fails": {
+			params:     map[string]any{"key": "TEST-1", "watcher": "nobody"},
+			stderr:     "user not found",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to add watcher",
+		},
+		"missing key": {
+			params:     map[string]any{"watcher": "alice@example.com"},
+			wantErr:    true,
+			wantInText: "key is required",
+		},
+		"missing watcher": {
+			params:     map[string]any{"key": "TEST-1"},
+			wantErr:    true,
+			wantInText: "watcher is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleWatchIssue(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleAddWorklog(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"worklog succeeds": {
+			params:     map[string]any{"key": "TEST-1", "time_spent": "2h 30m"},
+			stdout:     "✓ Worklog added",
+			wantInText: "Worklog added",
+		},
+		"worklog fails": {
+			params:     map[string]any{"key": "TEST-1", "time_spent": "bad"},
+			stderr:     "invalid time",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to add worklog",
+		},
+		"missing key": {
+			params:     map[string]any{"time_spent": "1h"},
+			wantErr:    true,
+			wantInText: "key is required",
+		},
+		"missing time_spent": {
+			params:     map[string]any{"key": "TEST-1"},
+			wantErr:    true,
+			wantInText: "time_spent is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleAddWorklog(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleAddWorklogBuildArgs(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "✓ Worklog added"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	req := makeCallToolRequest(t, map[string]any{
+		"key":          "TEST-1",
+		"time_spent":   "2h 30m",
+		"comment":      "Fixed the bug",
+		"started":      "2026-04-30T10:00:00",
+		"new_estimate": "1h",
+	})
+
+	if _, err := handleAddWorklog(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	for _, want := range []string{"worklog add TEST-1 2h 30m", "--comment Fixed the bug", "--started 2026-04-30T10:00:00", "--new-estimate 1h"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\nfull args: %s", want, args)
+		}
+	}
+}
+
+func TestHandleCreateEpic(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"create epic succeeds": {
+			params:     map[string]any{"name": "Q3 Goals", "summary": "Q3 Roadmap"},
+			stdout:     "✓ Epic created\nhttps://example.atlassian.net/browse/TEST-500\n",
+			wantInText: "Epic created",
+		},
+		"create epic fails": {
+			params:     map[string]any{"name": "Bad", "summary": "Fail"},
+			stderr:     "permission denied",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to create epic",
+		},
+		"missing name": {
+			params:     map[string]any{"summary": "No name"},
+			wantErr:    true,
+			wantInText: "name is required",
+		},
+		"missing summary": {
+			params:     map[string]any{"name": "No summary"},
+			wantErr:    true,
+			wantInText: "summary is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleCreateEpic(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleCreateEpicBuildArgs(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "https://example.atlassian.net/browse/TEST-500\n"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	req := makeCallToolRequest(t, map[string]any{
+		"name":       "Q3 Goals",
+		"summary":    "Q3 Roadmap",
+		"body":       "Epic description",
+		"priority":   "High",
+		"assignee":   "alice@example.com",
+		"project":    "TEST",
+		"labels":     []any{"roadmap"},
+		"components": []any{"Platform"},
+		"custom":     map[string]any{"team": "backend"},
+	})
+
+	if _, err := handleCreateEpic(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	for _, want := range []string{"-n Q3 Goals", "-s Q3 Roadmap", "-b Epic description", "-y High", "-a alice@example.com", "-p TEST", "-l roadmap", "-C Platform", "--custom team=backend"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\nfull args: %s", want, args)
+		}
+	}
+}
+
+func TestHandleListEpics(t *testing.T) {
+	jiraRunner = fakeRunner("TYPE\tKEY\tSUMMARY\tSTATUS\nEpic\tTEST-100\tQ3 Roadmap\tIn Progress\n", "", nil)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListEpics(context.Background(), makeCallToolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "TEST-100") {
+		t.Errorf("expected TEST-100 in output, got: %s", text)
+	}
+}
+
+func TestHandleListEpicsWithFilters(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "TYPE\tKEY\tSUMMARY\n"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	req := makeCallToolRequest(t, map[string]any{
+		"key":      "TEST-100",
+		"assignee": "alice",
+		"priority": "High",
+		"project":  "TEST",
+		"status":   []any{"In Progress"},
+		"labels":   []any{"roadmap"},
+		"limit":    float64(10),
+	})
+
+	if _, err := handleListEpics(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	for _, want := range []string{"epic list TEST-100", "-a alice", "-y High", "-p TEST", "-s In Progress", "-l roadmap", "--paginate=10"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args missing %q\nfull args: %s", want, args)
+		}
+	}
+}
+
+func TestHandleListEpicsWithJQL(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "TYPE\tKEY\tSUMMARY\n"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	if _, err := handleListEpics(context.Background(), makeCallToolRequest(t, map[string]any{"jql": "type = Epic"})); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	if !strings.Contains(args, "-q type = Epic") {
+		t.Errorf("args missing JQL\nfull args: %s", args)
+	}
+}
+
+func TestHandleAddIssuesToEpic(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"add succeeds": {
+			params:     map[string]any{"epic": "TEST-100", "issues": []any{"TEST-1", "TEST-2"}},
+			stdout:     "✓ Issues added to epic",
+			wantInText: "Issues added",
+		},
+		"add fails": {
+			params:     map[string]any{"epic": "TEST-100", "issues": []any{"TEST-1"}},
+			stderr:     "epic not found",
+			err:        errFake,
+			wantErr:    true,
+			wantInText: "Failed to add issues",
+		},
+		"missing epic": {
+			params:     map[string]any{"issues": []any{"TEST-1"}},
+			wantErr:    true,
+			wantInText: "epic is required",
+		},
+		"missing issues": {
+			params:     map[string]any{"epic": "TEST-100"},
+			wantErr:    true,
+			wantInText: "issues is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleAddIssuesToEpic(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleRemoveIssuesFromEpic(t *testing.T) {
+	tests := map[string]struct {
+		err        error
+		params     map[string]any
+		stdout     string
+		stderr     string
+		wantInText string
+		wantErr    bool
+	}{
+		"remove succeeds": {
+			params:     map[string]any{"issues": []any{"TEST-1", "TEST-2"}},
+			stdout:     "✓ Issues removed from epic",
+			wantInText: "Issues removed",
+		},
+		"missing issues": {
+			params:     map[string]any{},
+			wantErr:    true,
+			wantInText: "issues is required",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraRunner = fakeRunner(tc.stdout, tc.stderr, tc.err)
+			t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+			result, err := handleRemoveIssuesFromEpic(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(text, tc.wantInText) {
+				t.Errorf("result missing %q\nfull: %s", tc.wantInText, text)
+			}
+		})
+	}
+}
+
+func TestHandleListSprints(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "100\tSprint 1\t2026-01-01\t2026-01-15\tactive\n"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListSprints(context.Background(), makeCallToolRequest(t, map[string]any{
+		"state":   "active",
+		"project": "PRO",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "Sprint 1") {
+		t.Errorf("expected Sprint 1 in output, got: %s", text)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	if !strings.Contains(args, "--state active") {
+		t.Errorf("args missing --state\nfull args: %s", args)
+	}
+	if !strings.Contains(args, "-p PRO") {
+		t.Errorf("args missing -p PRO\nfull args: %s", args)
+	}
+}
+
+func TestHandleListBoards(t *testing.T) {
+	runner := &sequenceRunner{
+		responses: []fakeResponse{{stdout: "156\tPLAT board\tscrum\n"}},
+	}
+	jiraRunner = runner.run
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListBoards(context.Background(), makeCallToolRequest(t, map[string]any{
+		"project": "PLAT",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "PLAT board") {
+		t.Errorf("expected PLAT board in output, got: %s", text)
+	}
+
+	args := strings.Join(runner.calls[0].args, " ")
+	if !strings.Contains(args, "-p PLAT") {
+		t.Errorf("args missing -p PLAT\nfull args: %s", args)
+	}
+}
+
+func TestHandleListProjects(t *testing.T) {
+	jiraRunner = fakeRunner("PLAT\tPlatform\nPRO\tPresence\n", "", nil)
+	t.Cleanup(func() { jiraRunner = defaultRunJira })
+
+	result, err := handleListProjects(context.Background(), makeCallToolRequest(t, map[string]any{}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "PLAT") || !strings.Contains(text, "PRO") {
+		t.Errorf("expected projects in output, got: %s", text)
 	}
 }
 
