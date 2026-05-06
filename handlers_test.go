@@ -1172,8 +1172,8 @@ type apiCall struct {
 
 // apiResponse is a fake reply for a sequenced API call.
 type apiResponse struct {
-	body []byte
 	err  error
+	body []byte
 }
 
 // sequenceAPIFetcher records calls and returns responses in order.
