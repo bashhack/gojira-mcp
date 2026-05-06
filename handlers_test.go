@@ -1340,6 +1340,141 @@ func TestHandleMoveViaCloneErrorAtCreateNoPartial(t *testing.T) {
 	}
 }
 
+func TestHandleMoveViaCloneCreateReturnsInvalidJSON(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`not-json`)},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	if !strings.Contains(resultText(t, result), "step 3") {
+		t.Errorf("expected step 3 parse error: %s", resultText(t, result))
+	}
+}
+
+func TestHandleMoveViaCloneCreateReturnsEmptyKey(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"id":"99"}`)},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	if !strings.Contains(resultText(t, result), "no key") {
+		t.Errorf("expected 'no key' error: %s", resultText(t, result))
+	}
+}
+
+func TestHandleMoveViaCloneCommentsParseError(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"key":"TARGET-7"}`)},
+			{body: []byte(`not-json`)},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"Partial success", "TARGET-7", "step 4"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+}
+
+func TestHandleMoveViaCloneCommentPostFailure(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"key":"TARGET-8"}`)},
+			{body: []byte(`{"comments":[{"body":{"type":"doc","content":[]}}]}`)},
+			{err: errFake},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"Partial success", "TARGET-8", "step 4 (post comment 1/1)"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+}
+
+func TestHandleMoveViaCloneLinkFailure(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"key":"TARGET-3"}`)},
+			{err: errFake},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+		"copy_comments": false,
+		"delete_source": false,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"Partial success", "TARGET-3", "step 5"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+}
+
 func TestHandleMoveViaClonePartialSuccessOnDeleteFailure(t *testing.T) {
 	seq := &sequenceAPIFetcher{
 		responses: []apiResponse{
