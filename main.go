@@ -51,6 +51,7 @@ func main() {
 	s.AddTool(listProjectsTool, handleListProjects)
 	s.AddTool(changeIssueTypeTool, handleChangeIssueType)
 	s.AddTool(moveIssueToProjectTool, handleMoveIssueToProject)
+	s.AddTool(moveViaCloneTool, handleMoveViaClone)
 
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("server error: %v", err)

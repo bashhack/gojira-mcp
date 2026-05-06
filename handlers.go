@@ -806,3 +806,181 @@ func handleMoveIssueToProject(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("✓ %s moved to project %q", key, project)), nil
 }
+
+// handleMoveViaClone moves an issue to another project by clone-and-delete.
+// Used as a fallback when the global Bulk Change permission is unavailable
+// and the REST PUT endpoint silently no-ops on project-field changes.
+//
+// The flow is six steps; on partial failure the new key (if any) is reported
+// so the caller can decide whether to retry or clean up:
+//
+//  1. GET source issue fields (summary, description, issue type, priority,
+//     labels, components)
+//  2. Build the create payload, copying ADF description as-is
+//  3. POST to /issue, capturing the new key
+//  4. If copy_comments: GET source comments, POST each to the clone
+//  5. If !delete_source: POST a Cloners link from source to clone
+//  6. If delete_source: DELETE the source issue
+//
+// History, attachments, watchers, sprint membership, status, and custom
+// fields are NOT preserved.
+func handleMoveViaClone(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	project := req.GetString("project", "")
+	copyComments := req.GetBool("copy_comments", true)
+	deleteSource := req.GetBool("delete_source", true)
+
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+	if project == "" {
+		return mcp.NewToolResultError("project is required"), nil
+	}
+
+	// Step 1: GET source fields
+	sourceBody, err := jiraAPIFetcher(ctx, "GET", "/rest/api/3/issue/"+url.PathEscape(key)+"?fields=summary,description,issuetype,priority,labels,components", nil)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("step 1 (fetch source %s): %s", key, err)), nil
+	}
+	var source struct {
+		Fields struct {
+			Summary     string          `json:"summary"`
+			Description json.RawMessage `json:"description"`
+			IssueType   struct {
+				Name string `json:"name"`
+			} `json:"issuetype"`
+			Priority *struct {
+				Name string `json:"name"`
+			} `json:"priority"`
+			Labels     []string `json:"labels"`
+			Components []struct {
+				Name string `json:"name"`
+			} `json:"components"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(sourceBody, &source); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("step 1 (parse source): %s", err)), nil
+	}
+
+	// Step 2: build create payload
+	fields := map[string]any{
+		"project":   map[string]string{"key": project},
+		"summary":   source.Fields.Summary,
+		"issuetype": map[string]string{"name": source.Fields.IssueType.Name},
+	}
+	if len(source.Fields.Description) > 0 && string(source.Fields.Description) != "null" {
+		fields["description"] = source.Fields.Description
+	}
+	if source.Fields.Priority != nil && source.Fields.Priority.Name != "" {
+		fields["priority"] = map[string]string{"name": source.Fields.Priority.Name}
+	}
+	if len(source.Fields.Labels) > 0 {
+		fields["labels"] = source.Fields.Labels
+	}
+	if len(source.Fields.Components) > 0 {
+		comps := make([]map[string]string, len(source.Fields.Components))
+		for i, c := range source.Fields.Components {
+			comps[i] = map[string]string{"name": c.Name}
+		}
+		fields["components"] = comps
+	}
+	createBody, err := json.Marshal(map[string]any{"fields": fields})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("step 2 (marshal create payload): %s", err)), nil
+	}
+
+	// Step 3: POST new issue
+	createResp, err := jiraAPIFetcher(ctx, "POST", "/rest/api/3/issue", createBody)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("step 3 (create in %s): %s", project, err)), nil
+	}
+	var created struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(createResp, &created); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("step 3 (parse create response): %s", err)), nil
+	}
+	if created.Key == "" {
+		return mcp.NewToolResultError(fmt.Sprintf("step 3: create returned no key — body: %s", string(createResp))), nil
+	}
+
+	commentsCopied := 0
+	linkAdded := false
+	sourceDeleted := false
+
+	// Used after step 3 — always include the new key in errors so the caller
+	// can clean up or follow up.
+	partial := func(step string, e error) *mcp.CallToolResult {
+		return mcp.NewToolResultError(fmt.Sprintf("Partial success — clone exists at %s but %s failed: %s\nState: %s", created.Key, step, e, summarizeMoveViaClone(key, created.Key, project, commentsCopied, linkAdded, sourceDeleted)))
+	}
+
+	// Step 4: copy comments
+	if copyComments {
+		commentsResp, err := jiraAPIFetcher(ctx, "GET", "/rest/api/3/issue/"+url.PathEscape(key)+"/comment", nil)
+		if err != nil {
+			return partial("step 4 (fetch source comments)", err), nil
+		}
+		var comments struct {
+			Comments []struct {
+				Body json.RawMessage `json:"body"`
+			} `json:"comments"`
+		}
+		if err := json.Unmarshal(commentsResp, &comments); err != nil {
+			return partial("step 4 (parse comments)", err), nil
+		}
+		for i, c := range comments.Comments {
+			if len(c.Body) == 0 || string(c.Body) == "null" {
+				continue
+			}
+			cb, err := json.Marshal(map[string]any{"body": c.Body})
+			if err != nil {
+				return partial(fmt.Sprintf("step 4 (marshal comment %d/%d)", i+1, len(comments.Comments)), err), nil
+			}
+			if _, err := jiraAPIFetcher(ctx, "POST", "/rest/api/3/issue/"+url.PathEscape(created.Key)+"/comment", cb); err != nil {
+				return partial(fmt.Sprintf("step 4 (post comment %d/%d)", i+1, len(comments.Comments)), err), nil
+			}
+			commentsCopied++
+		}
+	}
+
+	// Step 5: link (only if keeping source)
+	if !deleteSource {
+		linkBody, err := json.Marshal(map[string]any{
+			"type":         map[string]string{"name": "Cloners"},
+			"inwardIssue":  map[string]string{"key": key},
+			"outwardIssue": map[string]string{"key": created.Key},
+		})
+		if err != nil {
+			return partial("step 5 (marshal link)", err), nil
+		}
+		if _, err := jiraAPIFetcher(ctx, "POST", "/rest/api/3/issueLink", linkBody); err != nil {
+			return partial("step 5 (add Cloners link)", err), nil
+		}
+		linkAdded = true
+	}
+
+	// Step 6: delete source
+	if deleteSource {
+		if _, err := jiraAPIFetcher(ctx, "DELETE", "/rest/api/3/issue/"+url.PathEscape(key), nil); err != nil {
+			return partial("step 6 (delete source)", err), nil
+		}
+		sourceDeleted = true
+	}
+
+	return mcp.NewToolResultText(summarizeMoveViaClone(key, created.Key, project, commentsCopied, linkAdded, sourceDeleted)), nil
+}
+
+func summarizeMoveViaClone(sourceKey, newKey, project string, commentsCopied int, linkAdded, sourceDeleted bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "✓ Cloned %s → %s in project %s", sourceKey, newKey, project)
+	if commentsCopied > 0 {
+		fmt.Fprintf(&b, "\n  comments copied: %d", commentsCopied)
+	}
+	if linkAdded {
+		fmt.Fprintf(&b, "\n  link added: %s ← Cloners ← %s", sourceKey, newKey)
+	}
+	if sourceDeleted {
+		fmt.Fprintf(&b, "\n  source %s deleted", sourceKey)
+	}
+	return b.String()
+}
