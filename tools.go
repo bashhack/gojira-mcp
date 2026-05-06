@@ -202,3 +202,15 @@ var listProjectsTool = mcp.NewTool("list_projects",
 	mcp.WithReadOnlyHintAnnotation(true),
 	mcp.WithDestructiveHintAnnotation(false),
 )
+
+var changeIssueTypeTool = mcp.NewTool("change_issue_type",
+	mcp.WithDescription("Change the issue type of an existing Jira issue (e.g. Task → Story, Bug → Task). Calls the Jira REST API directly because jira-cli does not expose this operation."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithString("type", mcp.Required(), mcp.Description("Target issue type name, e.g. 'Story', 'Task', 'Bug', 'Epic'")),
+)
+
+var moveIssueToProjectTool = mcp.NewTool("move_issue_to_project",
+	mcp.WithDescription("Move a Jira issue to a different project. Note: Jira Cloud rejects cross-project moves when the source workflow or issue type is not configured in the target project — fall back to the Jira UI's Move action if that happens."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithString("project", mcp.Required(), mcp.Description("Target project key, e.g. 'NEWPROJ'")),
+)

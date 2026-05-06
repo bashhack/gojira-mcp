@@ -880,15 +880,15 @@ func TestHandleLinkIssuesMissingParams(t *testing.T) {
 	}
 }
 
-func fakeAPIFetcher(body []byte, err error) func(context.Context, string, string) ([]byte, error) {
-	return func(_ context.Context, _, _ string) ([]byte, error) {
+func fakeAPIFetcher(body []byte, err error) func(context.Context, string, string, []byte) ([]byte, error) {
+	return func(_ context.Context, _, _ string, _ []byte) ([]byte, error) {
 		return body, err
 	}
 }
 
 func TestHandleSearchUsers(t *testing.T) {
 	tests := map[string]struct {
-		fetcher    func(context.Context, string, string) ([]byte, error)
+		fetcher    func(context.Context, string, string, []byte) ([]byte, error)
 		params     map[string]any
 		wantInText []string
 		wantErr    bool
@@ -955,7 +955,7 @@ func TestHandleSearchUsers(t *testing.T) {
 
 func TestHandleSearchUsersAPIPath(t *testing.T) {
 	var capturedPath string
-	jiraAPIFetcher = func(_ context.Context, _ string, path string) ([]byte, error) {
+	jiraAPIFetcher = func(_ context.Context, _ string, path string, _ []byte) ([]byte, error) {
 		capturedPath = path
 		return []byte(`[]`), nil
 	}
@@ -977,6 +977,190 @@ func TestHandleSearchUsersAPIPath(t *testing.T) {
 	}
 	if !strings.Contains(capturedPath, "query=alice") {
 		t.Errorf("path missing query param: %s", capturedPath)
+	}
+}
+
+func TestHandleChangeIssueType(t *testing.T) {
+	tests := map[string]struct {
+		fetcher    func(context.Context, string, string, []byte) ([]byte, error)
+		params     map[string]any
+		wantInText []string
+		wantErr    bool
+	}{
+		"task to story": {
+			params:     map[string]any{"key": "PROJ-123", "type": "Story"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantInText: []string{"PROJ-123", "Story"},
+		},
+		"missing key": {
+			params:     map[string]any{"type": "Story"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"key is required"},
+		},
+		"missing type": {
+			params:     map[string]any{"key": "PROJ-123"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"type is required"},
+		},
+		"api error": {
+			params:     map[string]any{"key": "PROJ-123", "type": "Story"},
+			fetcher:    fakeAPIFetcher(nil, errFake),
+			wantErr:    true,
+			wantInText: []string{"Failed to change", "PROJ-123"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraAPIFetcher = tc.fetcher
+			t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+			result, err := handleChangeIssueType(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !tc.wantErr && result.IsError {
+				t.Fatalf("expected success, got error: %s", text)
+			}
+			for _, want := range tc.wantInText {
+				if !strings.Contains(text, want) {
+					t.Errorf("result missing %q\nfull: %s", want, text)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleChangeIssueTypeRequest(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody []byte
+	jiraAPIFetcher = func(_ context.Context, method, path string, body []byte) ([]byte, error) {
+		capturedMethod = method
+		capturedPath = path
+		capturedBody = body
+		return nil, nil
+	}
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleChangeIssueType(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key":  "PROJ-3297",
+		"type": "Story",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	if capturedMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", capturedMethod)
+	}
+	if capturedPath != "/rest/api/3/issue/PROJ-3297" {
+		t.Errorf("path = %q, want /rest/api/3/issue/PROJ-3297", capturedPath)
+	}
+	if !strings.Contains(string(capturedBody), `"name":"Story"`) {
+		t.Errorf("body missing name=Story: %s", string(capturedBody))
+	}
+	if !strings.Contains(string(capturedBody), `"issuetype"`) {
+		t.Errorf("body missing issuetype field: %s", string(capturedBody))
+	}
+}
+
+func TestHandleMoveIssueToProject(t *testing.T) {
+	tests := map[string]struct {
+		fetcher    func(context.Context, string, string, []byte) ([]byte, error)
+		params     map[string]any
+		wantInText []string
+		wantErr    bool
+	}{
+		"happy path": {
+			params:     map[string]any{"key": "PROJ-123", "project": "OTHER"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantInText: []string{"PROJ-123", "OTHER"},
+		},
+		"missing key": {
+			params:     map[string]any{"project": "OTHER"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"key is required"},
+		},
+		"missing project": {
+			params:     map[string]any{"key": "PROJ-123"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"project is required"},
+		},
+		"api error surfaces UI fallback hint": {
+			params:     map[string]any{"key": "PROJ-123", "project": "OTHER"},
+			fetcher:    fakeAPIFetcher(nil, errFake),
+			wantErr:    true,
+			wantInText: []string{"Failed to move", "Jira UI"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraAPIFetcher = tc.fetcher
+			t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+			result, err := handleMoveIssueToProject(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !tc.wantErr && result.IsError {
+				t.Fatalf("expected success, got error: %s", text)
+			}
+			for _, want := range tc.wantInText {
+				if !strings.Contains(text, want) {
+					t.Errorf("result missing %q\nfull: %s", want, text)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleMoveIssueToProjectRequest(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody []byte
+	jiraAPIFetcher = func(_ context.Context, method, path string, body []byte) ([]byte, error) {
+		capturedMethod = method
+		capturedPath = path
+		capturedBody = body
+		return nil, nil
+	}
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveIssueToProject(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key":     "PROJ-3297",
+		"project": "OTHER",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	if capturedMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", capturedMethod)
+	}
+	if capturedPath != "/rest/api/3/issue/PROJ-3297" {
+		t.Errorf("path = %q, want /rest/api/3/issue/PROJ-3297", capturedPath)
+	}
+	if !strings.Contains(string(capturedBody), `"key":"OTHER"`) {
+		t.Errorf("body missing key=OTHER: %s", string(capturedBody))
+	}
+	if !strings.Contains(string(capturedBody), `"project"`) {
+		t.Errorf("body missing project field: %s", string(capturedBody))
 	}
 }
 

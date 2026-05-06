@@ -421,7 +421,7 @@ func handleSearchUsers(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 		path += "&project=" + url.QueryEscape(project)
 	}
 
-	body, err := jiraAPIFetcher(ctx, "GET", path)
+	body, err := jiraAPIFetcher(ctx, "GET", path, nil)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to search users: %s", err)), nil
 	}
@@ -744,4 +744,65 @@ func handleListProjects(ctx context.Context, req mcp.CallToolRequest) (*mcp.Call
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to list projects: %s\n%s", errOut, out)), nil
 	}
 	return mcp.NewToolResultText(strings.TrimSpace(out)), nil
+}
+
+// handleChangeIssueType changes the issue type of an existing Jira issue.
+// jira-cli does not expose this operation, so the request is sent directly
+// to the Jira REST API as PUT /rest/api/3/issue/{key} with a JSON body
+// of {"fields":{"issuetype":{"name":<type>}}}.
+func handleChangeIssueType(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	issueType := req.GetString("type", "")
+
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+	if issueType == "" {
+		return mcp.NewToolResultError("type is required"), nil
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"fields": map[string]any{
+			"issuetype": map[string]string{"name": issueType},
+		},
+	})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal request body: %s", err)), nil
+	}
+
+	if _, err := jiraAPIFetcher(ctx, "PUT", "/rest/api/3/issue/"+url.PathEscape(key), body); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to change %s issue type to %q: %s", key, issueType, err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("✓ %s issue type changed to %q", key, issueType)), nil
+}
+
+// handleMoveIssueToProject reparents a Jira issue to a different project by
+// updating the project field via PUT /rest/api/3/issue/{key}. Jira Cloud
+// rejects cross-project moves when the source workflow or issue type is not
+// configured in the target project; in that case the API error is surfaced
+// verbatim so the caller can fall back to the Jira UI's Move action.
+func handleMoveIssueToProject(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) { //nolint:gocritic // hugeParam: signature required by mcp-go ToolHandlerFunc
+	key := req.GetString("key", "")
+	project := req.GetString("project", "")
+
+	if key == "" {
+		return mcp.NewToolResultError("key is required"), nil
+	}
+	if project == "" {
+		return mcp.NewToolResultError("project is required"), nil
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"fields": map[string]any{
+			"project": map[string]string{"key": project},
+		},
+	})
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal request body: %s", err)), nil
+	}
+
+	if _, err := jiraAPIFetcher(ctx, "PUT", "/rest/api/3/issue/"+url.PathEscape(key), body); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to move %s to project %q: %s\nIf the error mentions issuetype/workflow incompatibility, use the Jira UI's Move action.", key, project, err)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("✓ %s moved to project %q", key, project)), nil
 }
