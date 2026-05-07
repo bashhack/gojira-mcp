@@ -50,7 +50,6 @@ func main() {
 	s.AddTool(listBoardsTool, handleListBoards)
 	s.AddTool(listProjectsTool, handleListProjects)
 	s.AddTool(changeIssueTypeTool, handleChangeIssueType)
-	s.AddTool(moveIssueToProjectTool, handleMoveIssueToProject)
 	s.AddTool(moveViaCloneTool, handleMoveViaClone)
 
 	if err := server.ServeStdio(s); err != nil {
