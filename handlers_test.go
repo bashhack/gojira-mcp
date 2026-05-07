@@ -880,15 +880,15 @@ func TestHandleLinkIssuesMissingParams(t *testing.T) {
 	}
 }
 
-func fakeAPIFetcher(body []byte, err error) func(context.Context, string, string) ([]byte, error) {
-	return func(_ context.Context, _, _ string) ([]byte, error) {
+func fakeAPIFetcher(body []byte, err error) func(context.Context, string, string, []byte) ([]byte, error) {
+	return func(_ context.Context, _, _ string, _ []byte) ([]byte, error) {
 		return body, err
 	}
 }
 
 func TestHandleSearchUsers(t *testing.T) {
 	tests := map[string]struct {
-		fetcher    func(context.Context, string, string) ([]byte, error)
+		fetcher    func(context.Context, string, string, []byte) ([]byte, error)
 		params     map[string]any
 		wantInText []string
 		wantErr    bool
@@ -955,7 +955,7 @@ func TestHandleSearchUsers(t *testing.T) {
 
 func TestHandleSearchUsersAPIPath(t *testing.T) {
 	var capturedPath string
-	jiraAPIFetcher = func(_ context.Context, _ string, path string) ([]byte, error) {
+	jiraAPIFetcher = func(_ context.Context, _ string, path string, _ []byte) ([]byte, error) {
 		capturedPath = path
 		return []byte(`[]`), nil
 	}
@@ -977,6 +977,530 @@ func TestHandleSearchUsersAPIPath(t *testing.T) {
 	}
 	if !strings.Contains(capturedPath, "query=alice") {
 		t.Errorf("path missing query param: %s", capturedPath)
+	}
+}
+
+func TestHandleChangeIssueType(t *testing.T) {
+	tests := map[string]struct {
+		fetcher    func(context.Context, string, string, []byte) ([]byte, error)
+		params     map[string]any
+		wantInText []string
+		wantErr    bool
+	}{
+		"task to story": {
+			params:     map[string]any{"key": "PROJ-123", "type": "Story"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantInText: []string{"PROJ-123", "Story"},
+		},
+		"missing key": {
+			params:     map[string]any{"type": "Story"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"key is required"},
+		},
+		"missing type": {
+			params:     map[string]any{"key": "PROJ-123"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"type is required"},
+		},
+		"api error": {
+			params:     map[string]any{"key": "PROJ-123", "type": "Story"},
+			fetcher:    fakeAPIFetcher(nil, errFake),
+			wantErr:    true,
+			wantInText: []string{"Failed to change", "PROJ-123"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraAPIFetcher = tc.fetcher
+			t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+			result, err := handleChangeIssueType(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !tc.wantErr && result.IsError {
+				t.Fatalf("expected success, got error: %s", text)
+			}
+			for _, want := range tc.wantInText {
+				if !strings.Contains(text, want) {
+					t.Errorf("result missing %q\nfull: %s", want, text)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleChangeIssueTypeRequest(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody []byte
+	jiraAPIFetcher = func(_ context.Context, method, path string, body []byte) ([]byte, error) {
+		capturedMethod = method
+		capturedPath = path
+		capturedBody = body
+		return nil, nil
+	}
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleChangeIssueType(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key":  "PROJ-3297",
+		"type": "Story",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	if capturedMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", capturedMethod)
+	}
+	if capturedPath != "/rest/api/3/issue/PROJ-3297" {
+		t.Errorf("path = %q, want /rest/api/3/issue/PROJ-3297", capturedPath)
+	}
+	if !strings.Contains(string(capturedBody), `"name":"Story"`) {
+		t.Errorf("body missing name=Story: %s", string(capturedBody))
+	}
+	if !strings.Contains(string(capturedBody), `"issuetype"`) {
+		t.Errorf("body missing issuetype field: %s", string(capturedBody))
+	}
+}
+
+func TestHandleMoveIssueToProject(t *testing.T) {
+	tests := map[string]struct {
+		fetcher    func(context.Context, string, string, []byte) ([]byte, error)
+		params     map[string]any
+		wantInText []string
+		wantErr    bool
+	}{
+		"happy path": {
+			params:     map[string]any{"key": "PROJ-123", "project": "OTHER"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantInText: []string{"PROJ-123", "OTHER"},
+		},
+		"missing key": {
+			params:     map[string]any{"project": "OTHER"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"key is required"},
+		},
+		"missing project": {
+			params:     map[string]any{"key": "PROJ-123"},
+			fetcher:    fakeAPIFetcher(nil, nil),
+			wantErr:    true,
+			wantInText: []string{"project is required"},
+		},
+		"api error surfaces UI fallback hint": {
+			params:     map[string]any{"key": "PROJ-123", "project": "OTHER"},
+			fetcher:    fakeAPIFetcher(nil, errFake),
+			wantErr:    true,
+			wantInText: []string{"Failed to move", "Jira UI"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraAPIFetcher = tc.fetcher
+			t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+			result, err := handleMoveIssueToProject(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			text := resultText(t, result)
+			if tc.wantErr && !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !tc.wantErr && result.IsError {
+				t.Fatalf("expected success, got error: %s", text)
+			}
+			for _, want := range tc.wantInText {
+				if !strings.Contains(text, want) {
+					t.Errorf("result missing %q\nfull: %s", want, text)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleMoveIssueToProjectRequest(t *testing.T) {
+	var capturedMethod, capturedPath string
+	var capturedBody []byte
+	jiraAPIFetcher = func(_ context.Context, method, path string, body []byte) ([]byte, error) {
+		capturedMethod = method
+		capturedPath = path
+		capturedBody = body
+		return nil, nil
+	}
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveIssueToProject(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key":     "PROJ-3297",
+		"project": "OTHER",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %s", resultText(t, result))
+	}
+	if capturedMethod != "PUT" {
+		t.Errorf("method = %q, want PUT", capturedMethod)
+	}
+	if capturedPath != "/rest/api/3/issue/PROJ-3297" {
+		t.Errorf("path = %q, want /rest/api/3/issue/PROJ-3297", capturedPath)
+	}
+	if !strings.Contains(string(capturedBody), `"key":"OTHER"`) {
+		t.Errorf("body missing key=OTHER: %s", string(capturedBody))
+	}
+	if !strings.Contains(string(capturedBody), `"project"`) {
+		t.Errorf("body missing project field: %s", string(capturedBody))
+	}
+}
+
+// apiCall captures a single jiraAPIFetcher invocation for assertion.
+type apiCall struct {
+	method, path string
+	body         []byte
+}
+
+// apiResponse is a fake reply for a sequenced API call.
+type apiResponse struct {
+	err  error
+	body []byte
+}
+
+// sequenceAPIFetcher records calls and returns responses in order.
+type sequenceAPIFetcher struct {
+	calls     []apiCall
+	responses []apiResponse
+}
+
+func (s *sequenceAPIFetcher) fetch(_ context.Context, method, path string, body []byte) ([]byte, error) {
+	bodyCopy := append([]byte(nil), body...)
+	s.calls = append(s.calls, apiCall{method: method, path: path, body: bodyCopy})
+	idx := len(s.calls) - 1
+	if idx >= len(s.responses) {
+		idx = len(s.responses) - 1
+	}
+	r := s.responses[idx]
+	return r.body, r.err
+}
+
+func TestHandleMoveViaCloneHappyPathDelete(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"orig","description":{"type":"doc","content":[]},"issuetype":{"name":"Story"},"priority":{"name":"Medium"},"labels":["x"],"components":[{"name":"comp"}]}}`)},
+			{body: []byte(`{"key":"TARGET-1","id":"99"}`)},
+			{body: []byte(`{"comments":[{"body":{"type":"doc","content":[]}},{"body":{"type":"doc","content":[]}}]}`)},
+			{body: []byte(`{}`)},
+			{body: []byte(`{}`)},
+			{body: nil},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key":     "PROJ-1",
+		"project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"PROJ-1", "TARGET-1", "comments copied: 2", "source PROJ-1 deleted"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+	if len(seq.calls) != 6 {
+		t.Fatalf("expected 6 API calls, got %d", len(seq.calls))
+	}
+	if seq.calls[0].method != "GET" || !strings.HasPrefix(seq.calls[0].path, "/rest/api/3/issue/PROJ-1") {
+		t.Errorf("call 1 = %+v, want GET source", seq.calls[0])
+	}
+	if seq.calls[1].method != "POST" || seq.calls[1].path != "/rest/api/3/issue" {
+		t.Errorf("call 2 = %+v, want POST create", seq.calls[1])
+	}
+	if !strings.Contains(string(seq.calls[1].body), `"key":"TARGET"`) {
+		t.Errorf("create body missing target project: %s", string(seq.calls[1].body))
+	}
+	if !strings.Contains(string(seq.calls[1].body), `"name":"Story"`) {
+		t.Errorf("create body missing issue type: %s", string(seq.calls[1].body))
+	}
+	if seq.calls[5].method != "DELETE" {
+		t.Errorf("last call = %s %s, want DELETE", seq.calls[5].method, seq.calls[5].path)
+	}
+}
+
+func TestHandleMoveViaCloneKeepSourceWithLink(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"orig","issuetype":{"name":"Task"}}}`)},
+			{body: []byte(`{"key":"TARGET-2"}`)},
+			{body: []byte(`{}`)},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key":           "PROJ-2",
+		"project":       "TARGET",
+		"copy_comments": false,
+		"delete_source": false,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success: %s", resultText(t, result))
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"PROJ-2", "TARGET-2", "Cloners"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "deleted") {
+		t.Errorf("expected source to NOT be deleted: %s", text)
+	}
+	if len(seq.calls) != 3 {
+		t.Fatalf("expected 3 calls (get, create, link), got %d", len(seq.calls))
+	}
+	if seq.calls[2].path != "/rest/api/3/issueLink" {
+		t.Errorf("call 3 = %+v, want issueLink POST", seq.calls[2])
+	}
+	if !strings.Contains(string(seq.calls[2].body), `"name":"Cloners"`) {
+		t.Errorf("link body missing Cloners type: %s", string(seq.calls[2].body))
+	}
+}
+
+func TestHandleMoveViaCloneValidation(t *testing.T) {
+	tests := map[string]struct {
+		params  map[string]any
+		wantMsg string
+	}{
+		"missing key":     {params: map[string]any{"project": "T"}, wantMsg: "key is required"},
+		"missing project": {params: map[string]any{"key": "P-1"}, wantMsg: "project is required"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jiraAPIFetcher = fakeAPIFetcher(nil, nil)
+			t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+			result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, tc.params))
+			if err != nil {
+				t.Fatalf("unexpected: %v", err)
+			}
+			if !result.IsError {
+				t.Fatal("expected error result")
+			}
+			if !strings.Contains(resultText(t, result), tc.wantMsg) {
+				t.Errorf("missing %q: %s", tc.wantMsg, resultText(t, result))
+			}
+		})
+	}
+}
+
+func TestHandleMoveViaCloneErrorAtCreateNoPartial(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{err: errFake},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-3", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	if !strings.Contains(text, "step 3") {
+		t.Errorf("expected step 3 error, got: %s", text)
+	}
+	if strings.Contains(text, "Partial success") {
+		t.Errorf("create failure should not be partial — source untouched: %s", text)
+	}
+}
+
+func TestHandleMoveViaCloneCreateReturnsInvalidJSON(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`not-json`)},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	if !strings.Contains(resultText(t, result), "step 3") {
+		t.Errorf("expected step 3 parse error: %s", resultText(t, result))
+	}
+}
+
+func TestHandleMoveViaCloneCreateReturnsEmptyKey(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"id":"99"}`)},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	if !strings.Contains(resultText(t, result), "no key") {
+		t.Errorf("expected 'no key' error: %s", resultText(t, result))
+	}
+}
+
+func TestHandleMoveViaCloneCommentsParseError(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"key":"TARGET-7"}`)},
+			{body: []byte(`not-json`)},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"Partial success", "TARGET-7", "step 4"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+}
+
+func TestHandleMoveViaCloneCommentPostFailure(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"key":"TARGET-8"}`)},
+			{body: []byte(`{"comments":[{"body":{"type":"doc","content":[]}}]}`)},
+			{err: errFake},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"Partial success", "TARGET-8", "step 4 (post comment 1/1)"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+}
+
+func TestHandleMoveViaCloneLinkFailure(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"key":"TARGET-3"}`)},
+			{err: errFake},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-1", "project": "TARGET",
+		"copy_comments": false,
+		"delete_source": false,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"Partial success", "TARGET-3", "step 5"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in: %s", want, text)
+		}
+	}
+}
+
+func TestHandleMoveViaClonePartialSuccessOnDeleteFailure(t *testing.T) {
+	seq := &sequenceAPIFetcher{
+		responses: []apiResponse{
+			{body: []byte(`{"fields":{"summary":"x","issuetype":{"name":"Story"}}}`)},
+			{body: []byte(`{"key":"TARGET-9"}`)},
+			{body: []byte(`{"comments":[]}`)},
+			{err: errFake},
+		},
+	}
+	jiraAPIFetcher = seq.fetch
+	t.Cleanup(func() { jiraAPIFetcher = defaultJiraAPIFetch })
+
+	result, err := handleMoveViaClone(context.Background(), makeCallToolRequest(t, map[string]any{
+		"key": "PROJ-9", "project": "TARGET",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error result")
+	}
+	text := resultText(t, result)
+	for _, want := range []string{"Partial success", "TARGET-9", "step 6"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q: %s", want, text)
+		}
 	}
 }
 

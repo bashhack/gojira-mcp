@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -76,8 +77,10 @@ func loadJiraConfig() (cfg jiraConfig, retErr error) {
 
 // defaultJiraAPIFetch makes an authenticated HTTP request to the Jira
 // REST API. It reads credentials from the jira-cli config and
-// JIRA_API_TOKEN environment variable.
-func defaultJiraAPIFetch(ctx context.Context, method, path string) (_ []byte, retErr error) {
+// JIRA_API_TOKEN environment variable. Pass a nil body for GET; pass a
+// JSON-encoded body for PUT/POST and the Content-Type header is set
+// automatically.
+func defaultJiraAPIFetch(ctx context.Context, method, path string, body []byte) (_ []byte, retErr error) {
 	cfg, err := loadJiraConfig()
 	if err != nil {
 		return nil, err
@@ -88,7 +91,12 @@ func defaultJiraAPIFetch(ctx context.Context, method, path string) (_ []byte, re
 		return nil, fmt.Errorf("JIRA_API_TOKEN environment variable not set")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, cfg.server+path, http.NoBody)
+	var reqBody io.Reader = http.NoBody
+	if body != nil {
+		reqBody = bytes.NewReader(body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, cfg.server+path, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -96,6 +104,9 @@ func defaultJiraAPIFetch(ctx context.Context, method, path string) (_ []byte, re
 	creds := base64.StdEncoding.EncodeToString([]byte(cfg.login + ":" + token))
 	req.Header.Set("Authorization", "Basic "+creds)
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := apiHTTPClient.Do(req)
 	if err != nil {
@@ -107,13 +118,13 @@ func defaultJiraAPIFetch(ctx context.Context, method, path string) (_ []byte, re
 		}
 	}()
 
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("jira API returned %s: %s", resp.Status, string(body))
+		return nil, fmt.Errorf("jira API returned %s: %s", resp.Status, string(respBody))
 	}
-	return body, nil
+	return respBody, nil
 }

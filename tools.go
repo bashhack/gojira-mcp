@@ -202,3 +202,24 @@ var listProjectsTool = mcp.NewTool("list_projects",
 	mcp.WithReadOnlyHintAnnotation(true),
 	mcp.WithDestructiveHintAnnotation(false),
 )
+
+var changeIssueTypeTool = mcp.NewTool("change_issue_type",
+	mcp.WithDescription("Change the issue type of an existing Jira issue (e.g. Task → Story, Bug → Task). Calls the Jira REST API directly because jira-cli does not expose this operation."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithString("type", mcp.Required(), mcp.Description("Target issue type name, e.g. 'Story', 'Task', 'Bug', 'Epic'")),
+)
+
+var moveIssueToProjectTool = mcp.NewTool("move_issue_to_project",
+	mcp.WithDescription("Move a Jira issue to a different project. Note: Jira Cloud rejects cross-project moves when the source workflow or issue type is not configured in the target project — fall back to the Jira UI's Move action if that happens."),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Issue key, e.g. PROJ-123")),
+	mcp.WithString("project", mcp.Required(), mcp.Description("Target project key, e.g. 'NEWPROJ'")),
+)
+
+var moveViaCloneTool = mcp.NewTool("move_via_clone",
+	mcp.WithDescription("Single-shot move-by-clone: read source issue, create equivalent in target project, optionally copy comments, optionally link or delete the source. Use this when you lack the global Bulk Change permission and the public REST PUT does not support cross-project moves. Caveats: history, attachments, watchers, sprint membership, status, and custom fields are NOT preserved; the issue is renumbered (PLAT-123 → NEWPROJ-N)."),
+	mcp.WithDestructiveHintAnnotation(true),
+	mcp.WithString("key", mcp.Required(), mcp.Description("Source issue key, e.g. PROJ-123")),
+	mcp.WithString("project", mcp.Required(), mcp.Description("Target project key, e.g. 'EDMOD'")),
+	mcp.WithBoolean("copy_comments", mcp.Description("Copy comments from source to clone (default true)")),
+	mcp.WithBoolean("delete_source", mcp.Description("Delete the source issue after a successful clone (default true). When false, link source as 'is cloned by' the new issue.")),
+)
